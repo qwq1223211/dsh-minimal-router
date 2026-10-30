@@ -37,6 +37,7 @@ import {
   buildTemplate,
   loadCustomStagesSync,
 } from '../lib/stages-config.js'
+import { estimateSwitchEconomy, decideByEconomy, describeEconomy } from '../lib/cost.js'
 import { apply, normalizeConfig, collectStrings, DEFAULT_STAGES } from '../index.js'
 
 const GREEN = '\x1b[32m'
@@ -511,21 +512,30 @@ function makeFakeCtx(options = {}) {
 
   // 模拟真实的"限制生效"语义：被 deny 的工具从 schemas() 里消失，
   // dispose 限制后又回来。这样才能测出"先拆旧限制、再算新列表"的顺序坑。
+  // 【要点】给每个工具一个接近真实的体量（描述 + 参数）。
+  // 否则成本闸门算出来的"摘掉字节数"接近 0，回本永远要几百轮，
+  // 会把和它无关的用例一起拦掉（实测踩过）。
+  const TOOL_PAD = 'x'.repeat(600)
+  const mkTool = (name) => ({
+    name,
+    description: `${name} test tool ${TOOL_PAD}`,
+    parameters: { type: 'object', properties: { a: { type: 'string' } } },
+  })
   const BASE_TOOLS = [
-    { name: 'read' },
-    { name: 'write' },
-    { name: 'unity_object_create' },
-    { name: 'unity_status' },
-    { name: 'asset_audit' },
-    { name: 'perf_snapshot' },
-    { name: 'ui_add' },
-    { name: 'meshy_image_to_3d' },
-    { name: 'audio_generate_sfx' },
-    { name: 'route_stage' },
-    { name: 'route_status' },
-    { name: 'route_reset' },
-    { name: 'guard_reset' },
-  ]
+    'read',
+    'write',
+    'unity_object_create',
+    'unity_status',
+    'asset_audit',
+    'perf_snapshot',
+    'ui_add',
+    'meshy_image_to_3d',
+    'audio_generate_sfx',
+    'route_stage',
+    'route_status',
+    'route_reset',
+    'guard_reset',
+  ].map(mkTool)
   let denied = new Set()
 
   // DSH 的 restrict() 只能在 agent.ctx 上调（全局调用会被拒绝），
@@ -1288,9 +1298,10 @@ await test('闸门：上下文不大时，关键词照常切阶段', async () =>
   const rt = makeFakeCtx()
   apply(rt.ctx, { contextGuardThreshold: 100000 })
   const agent = rt.makeAgent('small')
-  await feedContext(rt, 'small', 20000)
+  await feedContext(rt, 'small', 2000)
   const listener = (rt.listeners.get('agent/inbox/claimed') || [])[0]
   // 迟滞默认 2：连续两次同向信号才切
+  // （上下文故意设得很小，这样成本闸门一定是"划算"，本用例测的是闸门之外的路径）
   listener({ agent, message: { content: [{ type: 'text', text: '生成一张贴图' }] } })
   listener({ agent, message: { content: [{ type: 'text', text: '再生成一张贴图' }] } })
   const status = await rt.tools.get('route_status').execute({}, { agent })
@@ -1379,6 +1390,114 @@ await test('迟滞集成：显式"切到 X 阶段"一句话就切', async () => 
   const status = await rt.tools.get('route_status').execute({}, { agent })
   assertEqual(status.stage, 'art')
   assertEqual(status.lastArbiterDecision.reason, 'explicit')
+})
+
+// ============================================================================
+// 10.8 成本闸门（P1+P2）：按最坏情况估"几轮能回本"
+// ============================================================================
+await test('成本：估算公式正确（成本按最坏情况 = 整段上下文）', () => {
+  const e = estimateSwitchEconomy({ contextTokens: 100000, deniedBytes: 100000 })
+  assertEqual(e.costTokens, 100000, '最坏情况：整段上下文全价')
+  assertEqual(e.savePerTurnTokens, 30000, '100,000 字节 × 0.3')
+  assertEqual(e.paybackTurns, 3.33)
+})
+
+await test('成本：省不下东西时 payback 是 null（不是 Infinity/NaN）', () => {
+  const e = estimateSwitchEconomy({ contextTokens: 50000, deniedBytes: 0 })
+  assertEqual(e.paybackTurns, null)
+  assertEqual(JSON.stringify(JSON.parse(JSON.stringify(e))), JSON.stringify(e), '必须是无损 JSON')
+})
+
+await test('成本：回本太快不值得的切换会被拦', () => {
+  const v = decideByEconomy({
+    economy: estimateSwitchEconomy({ contextTokens: 500000, deniedBytes: 90000 }),
+    maxPaybackTurns: 3,
+  })
+  assertEqual(v.allow, false)
+  assertEqual(v.reason, 'payback-too-long')
+})
+
+await test('成本：上下文还小的时候放行（回本很快）', () => {
+  const v = decideByEconomy({
+    economy: estimateSwitchEconomy({ contextTokens: 20000, deniedBytes: 90000 }),
+    maxPaybackTurns: 3,
+  })
+  assertEqual(v.allow, true)
+  assertEqual(v.reason, 'worth-it')
+})
+
+await test('成本：还没有上下文数据时放行（不拿"未知"当"亏本"）', () => {
+  const v = decideByEconomy({
+    economy: estimateSwitchEconomy({ contextTokens: 0, deniedBytes: 90000 }),
+    maxPaybackTurns: 3,
+  })
+  assertEqual(v.allow, true)
+  assertEqual(v.reason, 'no-cost-yet')
+})
+
+await test('成本：闸门可关闭', () => {
+  const v = decideByEconomy({
+    economy: estimateSwitchEconomy({ contextTokens: 500000, deniedBytes: 90000 }),
+    maxPaybackTurns: 3,
+    enabled: false,
+  })
+  assertEqual(v.allow, true)
+})
+
+await test('成本集成：大会话里自动切换被成本闸门拦住', async () => {
+  const rt = makeFakeCtx()
+  const warnings = []
+  const original = console.warn
+  console.warn = (...args) => warnings.push(args.join(' '))
+  try {
+    apply(rt.ctx, { contextGuardThreshold: 0 }) // 关掉旧的硬闸门，只测成本闸门
+    const agent = rt.makeAgent('cost-1')
+    await feedContext(rt, 'cost-1', 500000)
+    const listener = (rt.listeners.get('agent/inbox/claimed') || [])[0]
+    listener({ agent, message: { content: [{ type: 'text', text: '生成一张贴图' }] } })
+    const status = await rt.tools.get('route_status').execute({}, { agent })
+    assertEqual(status.stage, 'auto', '成本太高，不该切')
+    assertEqual(status.lastBlockedSwitch.by, 'cost-gate')
+    assert(status.lastBlockedSwitch.paybackTurns > 3, '要报出回本需要几轮')
+    assertEqual(warnings.length, 1)
+  } finally {
+    console.warn = original
+  }
+})
+
+await test('成本集成：小会话里同样的一句话照常切', async () => {
+  const rt = makeFakeCtx()
+  apply(rt.ctx, {})
+  const agent = rt.makeAgent('cost-2')
+  await feedContext(rt, 'cost-2', 2000)
+  const listener = (rt.listeners.get('agent/inbox/claimed') || [])[0]
+  listener({ agent, message: { content: [{ type: 'text', text: '生成一张贴图' }] } })
+  listener({ agent, message: { content: [{ type: 'text', text: '再生成一张贴图' }] } })
+  const status = await rt.tools.get('route_status').execute({}, { agent })
+  assertEqual(status.stage, 'art', '小会话回本快，应该允许切')
+})
+
+await test('成本集成：显式命令不被成本闸门拦（用户亲口要求的）', async () => {
+  const rt = makeFakeCtx()
+  apply(rt.ctx, { contextGuardThreshold: 0 })
+  const agent = rt.makeAgent('cost-3')
+  await feedContext(rt, 'cost-3', 500000)
+  const listener = (rt.listeners.get('agent/inbox/claimed') || [])[0]
+  listener({ agent, message: { content: [{ type: 'text', text: '切到美术阶段' }] } })
+  const status = await rt.tools.get('route_status').execute({}, { agent })
+  assertEqual(status.stage, 'art', '显式命令应该绕过成本闸门')
+})
+
+await test('成本集成：route_status 能列出每个阶段的回本账', async () => {
+  const rt = makeFakeCtx()
+  apply(rt.ctx, {})
+  const agent = rt.makeAgent('cost-4')
+  await feedContext(rt, 'cost-4', 100000)
+  const status = await rt.tools.get('route_status').execute({}, { agent })
+  assertEqual(status.switchEconomics.enabled, true)
+  assertEqual(status.switchEconomics.contextTokens, 100000)
+  assert(typeof status.switchEconomics.perStage.art === 'object', '每个阶段都要有账')
+  assertEqual(status.switchEconomics.perStage.art.paybackTurns > 0, true)
 })
 
 // ============================================================================

@@ -1,4 +1,4 @@
-# dsh-minimal-router · v1.1.0
+# dsh-minimal-router · v1.2.0
 
 [![Tests](https://github.com/qwq1223211/dsh-minimal-router/actions/workflows/test.yml/badge.svg)](https://github.com/qwq1223211/dsh-minimal-router/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
@@ -172,6 +172,26 @@ Demo it without paying for it: `simulateModel: deepseek-v4-pro`.
 ## Safety gate for huge contexts
 
 Switching stage in a very long session costs a full prefix rebuild. When the last request exceeded `contextGuardThreshold` (default `100000` tokens), `route_stage` is **refused** with an explanation, and requires `force: true` to proceed.
+
+### Cost gate: pay it back in how many turns?
+
+Mined from **615 real probe records** (60 prefix changes), the cost profile is **bimodal**:
+
+| Type | Count | Share of context that missed |
+|---|---|---|
+| Cheap | 35 | **0.2% – 1.2%** |
+| Catastrophic | 11 | **98% – 99%** |
+
+And it does not correlate with how much changed: a **98,778-byte** tool-list change cost 708 tokens,
+while an **481-byte** change cost **581,830**.
+
+Cheap is luck; expensive is risk. So the estimate assumes the worst case (the whole context at full
+price) and computes:
+
+> paybackTurns = worstCaseCost ÷ tokensSavedPerTurn (trimmed bytes × 0.3)
+
+An automatic switch is refused when payback exceeds `switchPaybackTurns` (default **3**).
+Explicit commands are exempt — if you asked for it, the accounting does not get to say no.
 
 ## Configuration
 

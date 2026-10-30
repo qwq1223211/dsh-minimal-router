@@ -27,6 +27,9 @@
         switchConfirmations: 2
         # 冷却：刚切过一次之后，多少毫秒内不再自动切换（0 = 关闭）
         switchCooldownMs: 120000
+        # 成本闸门：自动切换前先算"几轮能回本"，超过这个轮数就不切
+        costGateEnabled: true
+        switchPaybackTurns: 3
         # 降级保护：只有确认模型支持"系统提示追加到历史"才开尾插
         # 开源给别人用时必须保持 true
         requireInHistoryUpdates: true

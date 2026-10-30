@@ -32,6 +32,7 @@ import {
   computeDenyList,
 } from './lib/classify.js'
 import { createStageState, textOfMessage, detectStage, isExplicitSwitch, createSwitchArbiter } from './lib/stage.js'
+import { estimateSwitchEconomy, decideByEconomy, describeEconomy } from './lib/cost.js'
 import { renderHint, HINT_LIMIT } from './lib/prompt.js'
 import { scanCode, formatFindings } from './lib/lint.js'
 import { resolveCapability, formatDegradeWarning } from './lib/model-guard.js'
@@ -169,6 +170,10 @@ const CONFIG_DEFAULTS = {
   switchConfirmations: 2,
   // 【修改这里】★ 冷却：刚切过一次之后，多少毫秒内不再自动切换（0 = 关闭）
   switchCooldownMs: 120000,
+  // 【修改这里】★ 成本闸门：自动切换前先算"几轮能回本"，超过这个轮数就不切
+  //   依据：615 条真实记录里，切换成本是双峰的（有时 1%，有时 99%），所以按最坏情况估
+  costGateEnabled: true,
+  switchPaybackTurns: 3,
   // 【修改这里】演示/调试用：强制假装当前模型是这个名字（用来现场演示降级保护）
   //   例：simulateModel: deepseek-v4-pro  → 立刻触发降级警告，且不花一分钱
   simulateModel: '',
@@ -259,6 +264,11 @@ export function normalizeConfig(raw = {}) {
       Number.isFinite(Number(src.switchCooldownMs)) && Number(src.switchCooldownMs) >= 0
         ? Math.trunc(Number(src.switchCooldownMs))
         : CONFIG_DEFAULTS.switchCooldownMs,
+    costGateEnabled: src.costGateEnabled !== false,
+    switchPaybackTurns:
+      Number.isFinite(Number(src.switchPaybackTurns)) && Number(src.switchPaybackTurns) >= 0
+        ? Number(src.switchPaybackTurns)
+        : CONFIG_DEFAULTS.switchPaybackTurns,
     simulateModel: typeof src.simulateModel === 'string' ? src.simulateModel.trim() : '',
     guardEnabled: src.guardEnabled !== false,
     probeEnabled: src.probeEnabled !== false,
@@ -370,6 +380,36 @@ export function apply(ctx, config = {}) {
   })
   // 最近一次仲裁结果（route_status 里展示）
   let lastArbiterDecision = null
+
+  /** 切到某个阶段会摘掉多少字节的工具声明 */
+  function deniedBytesForStage(stage) {
+    try {
+      const schemas = typeof ctx.tools.schemas === 'function' ? ctx.tools.schemas() : []
+      const names = schemas.map((t) => (t && typeof t.name === 'string' ? t.name : '')).filter(Boolean)
+      const deny = new Set(
+        computeDenyList({ toolNames: names, stage, stages: cfg.stages, claimed, coreTools: cfg.coreTools }),
+      )
+      if (deny.size === 0) return 0
+      let bytes = 0
+      for (const tool of schemas) {
+        if (!tool || !deny.has(tool.name)) continue
+        bytes += JSON.stringify({
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.parameters,
+        }).length
+      }
+      return bytes
+    } catch {
+      return 0
+    }
+  }
+
+  /** 估算"现在切到这个阶段"的成本 / 收益 / 回本轮数 */
+  function estimateForStage(key, stage) {
+    const contextTokens = promptTokensBySession.get(key) || 0
+    return estimateSwitchEconomy({ contextTokens, deniedBytes: deniedBytesForStage(stage) })
+  }
 
   function rememberAgent(agent) {
     try {
@@ -634,7 +674,17 @@ export function apply(ctx, config = {}) {
           return { ok: false, stage: state.get(key).stage, error: result.error, available: Object.keys(cfg.stages) }
         }
         const restriction = refreshRestriction(key, exec && exec.agent)
-        return { ok: true, stage: result.stage, hint: hintFor(key), restriction }
+        const economy = estimateForStage(key, result.stage)
+        return {
+          ok: true,
+          stage: result.stage,
+          hint: hintFor(key),
+          restriction,
+          economics: {
+            ...economy,
+            describe: describeEconomy(economy, cfg.switchPaybackTurns),
+          },
+        }
       },
     }),
   )
@@ -712,6 +762,23 @@ export function apply(ctx, config = {}) {
           // 迟滞/冷却状态：为什么刚才那句关键词没让阶段变
           switchArbiter: switchArbiter.snapshot(key),
           lastArbiterDecision,
+          // 成本闸门：每个阶段"现在切过去"值不值（按最坏情况估）
+          switchEconomics: {
+            enabled: cfg.costGateEnabled,
+            contextTokens: promptTokensBySession.get(key) || 0,
+            maxPaybackTurns: cfg.switchPaybackTurns,
+            perStage: Object.fromEntries(
+              Object.keys(cfg.stages).map((name) => {
+                const economy = estimateForStage(key, name)
+                const verdict = decideByEconomy({
+                  economy,
+                  maxPaybackTurns: cfg.switchPaybackTurns,
+                  enabled: cfg.costGateEnabled,
+                })
+                return [name, { ...economy, allow: verdict.allow, reason: verdict.reason }]
+              }),
+            ),
+          },
           enforceByRestrict: cfg.enforceByRestrict,
           // 【降级状态】开源给别人的时候，这两个字段就是"为什么它没生效"的答案
           degraded: !guard.safe,
@@ -910,7 +977,39 @@ export function apply(ctx, config = {}) {
         return
       }
 
-      // ---- 闸门 2：迟滞 + 冷却（抑制"顺嘴提一句就切"的抖动）----
+      // ---- 闸门 2：成本闸门（自动切换前，先算几轮能回本）----
+      // 【注意】显式命令（"切到美术阶段"）跳过这一层：用户亲口要求的，不该被经济账拦。
+      if (cfg.costGateEnabled && !isExplicitSwitch(text) && detected && detected !== current) {
+        const economy = estimateForStage(key, detected)
+        const verdict = decideByEconomy({
+          economy,
+          maxPaybackTurns: cfg.switchPaybackTurns,
+          enabled: true,
+        })
+        if (!verdict.allow) {
+          lastBlockedSwitch = {
+            at: Date.now(),
+            by: 'cost-gate',
+            from: current,
+            to: detected,
+            contextTokens,
+            estimatedCost: economy.costTokens,
+            savePerTurn: economy.savePerTurnTokens,
+            paybackTurns: economy.paybackTurns,
+            reason: verdict.reason,
+          }
+          if (!blockedWarned.has(`${key}|cost`)) {
+            blockedWarned.add(`${key}|cost`)
+            console.warn(
+              `[minimal-router] 已阻止一次"自动切阶段"（${current} → ${detected}）：${describeEconomy(economy, cfg.switchPaybackTurns)}` +
+                ` 显式切换仍可用 route_stage。`,
+            )
+          }
+          return
+        }
+      }
+
+      // ---- 闸门 3：迟滞 + 冷却（抑制"顺嘴提一句就切"的抖动）----
       if (detected && detected !== current) {
         const decision = switchArbiter.decide({ key, detected, explicit: isExplicitSwitch(text) })
         if (!decision.switch) {

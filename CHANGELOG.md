@@ -3,6 +3,35 @@
 All notable changes to `dsh-minimal-router`.
 Format: [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/).
 
+## [1.2.0] — 2026-10-30
+
+Turns the "should we switch?" question into an economic calculation, using data mined from the
+project's own probe history instead of intuition.
+
+### Added
+
+- **`lib/cost.js`** — `estimateSwitchEconomy()` / `decideByEconomy()` / `describeEconomy()`.
+  Cost is estimated at the **worst case** (whole context at full price), savings at the measured
+  **0.30 tokens per byte** of trimmed tool declarations.
+- **Cost gate.** Automatic (keyword-driven) switches are refused when
+  `paybackTurns > switchPaybackTurns` (default **3**). Explicit commands are exempt.
+- `route_status` now reports `switchEconomics`: per-stage cost, per-turn saving, payback and verdict.
+  `route_stage` returns the same numbers for the stage it just switched to.
+- 10 new tests (router 113 → 123; **175 total**).
+
+### Findings that shaped this (kept here because they are counter-intuitive)
+
+From 615 probe records / 60 prefix changes:
+
+| Type | Count | Share of context that missed |
+|---|---|---|
+| Cheap | 35 | 0.2% – 1.2% |
+| Catastrophic | 11 | 98% – 99% |
+
+Cost does **not** correlate with how much changed: a **98,778-byte** tool-list change cost 708 tokens,
+while a **481-byte** change cost **581,830**. The mean (46.5%) is meaningless for a bimodal
+distribution, which is exactly why the estimate is worst-case rather than average.
+
 ## [1.1.0] — 2026-10-30
 
 Attacks v1.0.0's biggest risk: a stage switch costs anywhere from **3,205** to **513,857**

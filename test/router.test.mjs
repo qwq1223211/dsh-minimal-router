@@ -2299,6 +2299,41 @@ await test('可见数：不再对外报"还剩多少"，只留估算 + 指向探
 })
 
 // ============================================================================
+// 10.23 allow 裁剪模式（deny 模式依赖注册表大小，实测会算错）
+// ============================================================================
+await test('allow 模式：restrict 收到的是 allow 列表，不是 deny', async () => {
+  const rt = makeFakeCtx()
+  apply(rt.ctx, { enforceByRestrict: true, restrictMode: 'allow' })
+  const agent = rt.makeAgent('allow-1')
+  await rt.tools.get('route_stage').execute({ stage: 'core' }, { agent })
+  const last = rt.restricts[rt.restricts.length - 1]
+  assert(Array.isArray(last.allow), 'allow 模式必须传 allow 数组')
+  assertEqual(last.deny, undefined, '不该同时传 deny（会让语义含混）')
+  assert(last.allow.includes('read'), '基础工具必须在 allow 里')
+  assertEqual(last.allow.includes('unity_object_create'), false, '被禁的组不该在 allow 里')
+})
+
+await test('allow 模式：route_status 会说明当前用的是哪种模式', async () => {
+  const rt = makeFakeCtx()
+  apply(rt.ctx, { enforceByRestrict: true, restrictMode: 'allow' })
+  const agent = rt.makeAgent('allow-2')
+  await rt.tools.get('route_stage').execute({ stage: 'core' }, { agent })
+  const status = await rt.tools.get('route_status').execute({}, { agent })
+  assertEqual(status.restrictMode, 'allow')
+})
+
+await test('保留名 run_code 永远不会被写进 restrict 列表（否则整个调用会抛）', async () => {
+  const rt = makeFakeCtx({ toolNames: ['read', 'write', 'run_code', 'unity_object_create', 'route_status'] })
+  apply(rt.ctx, { enforceByRestrict: true })
+  const agent = rt.makeAgent('reserved-1')
+  await rt.tools.get('route_stage').execute({ stage: 'core' }, { agent })
+  for (const call of rt.restricts) {
+    const names = [...(call.deny || []), ...(call.allow || [])]
+    assertEqual(names.includes('run_code'), false, `restrict 里不能出现 run_code：${JSON.stringify(call)}`)
+  }
+})
+
+// ============================================================================
 // 11. 配置
 // ============================================================================
 await test('配置：脏数据自动回退，不会把插件搞挂', () => {

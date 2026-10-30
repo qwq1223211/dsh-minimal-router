@@ -19,6 +19,10 @@
         enforceStage: true
         # 是否用 restrict() 物理砍掉不属于当前阶段的工具（省 token 的关键）
         enforceByRestrict: true
+        # 裁剪模式：deny = 摘掉不要的（默认） / allow = 只留要的
+        # deny 依赖"注册表有多大"，实测会算错（按 138 算 deny=100，作用在 172 的全局表上，实际剩 72）；
+        # allow 不关心总数，结果可预测。想更确定就切 allow。
+        restrictMode: deny
         # 本地体检模式：deny 拦截 / warn 只记日志 / off 关闭
         lintMode: deny
         # 安全闸门：上次请求超过这个 token 数就拦住切阶段（0 = 关闭）

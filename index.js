@@ -225,6 +225,11 @@ const CONFIG_DEFAULTS = {
   // 【修改这里】★ 冷却：刚切过一次之后，多少毫秒内不再自动切换（0 = 关闭）
   //   默认 60 秒 —— 从 88 次真实切换的间隔里量的：71% 的相邻切换发生在 60 秒内
   switchCooldownMs: 60000,
+  // 【修改这里】★ 裁剪模式：'deny'（默认，摘掉不要的）/ 'allow'（只留要的）
+  //   deny 的问题是它依赖"注册表有多大"：A/B 实测按 138 算 deny=100，作用在 172 的全局表上，
+  //   结果剩 72 而不是 38。allow 模式不关心总数，只留点名的，结果可预测。
+  //   默认仍是 deny（保守），想更确定就切 allow —— 两种模式都能被 A/B 验证。
+  restrictMode: 'deny',
   // 【修改这里】★ 时间窗：两次关键词信号相隔超过这个毫秒数，就当新任务重新计数
   //   默认 5 分钟 —— 大于实测 P75（81 秒），让同一段对话里的连续提到能累加
   switchConfirmWindowMs: 300000,
@@ -378,6 +383,7 @@ export function normalizeConfig(raw = {}) {
     defaultStage: typeof src.defaultStage === 'string' && stages[src.defaultStage] ? src.defaultStage : 'auto',
     enforceStage: src.enforceStage !== false,
     enforceByRestrict: src.enforceByRestrict === true,
+    restrictMode: src.restrictMode === 'allow' ? 'allow' : 'deny',
     requireInHistoryUpdates: src.requireInHistoryUpdates !== false,
     unsafeForce: src.unsafeForce === true,
     trustedModels: Array.isArray(src.trustedModels) ? src.trustedModels.filter((x) => typeof x === 'string' && x) : [],
@@ -612,7 +618,9 @@ export function apply(ctx, config = {}) {
     // 【任务驱动】本会话有动态收窄授权时，它优先于阶段规则
     const grant = dynamicGrants.get(key)
     const grantGroups = grant && grant.groups && grant.groups.size > 0 ? grant.groups : null
-    const signature = grantGroups ? `dyn:${[...grantGroups].sort().join(',')}` : `stage:${stage}`
+    // 裁剪模式也进签名：deny/allow 互换时必须重新算一次，否则会因为"签名没变"被跳过
+    const restrictMode = cfg.restrictMode === 'allow' ? 'allow' : 'deny'
+    const signature = `${restrictMode}:${grantGroups ? `dyn:${[...grantGroups].sort().join(',')}` : `stage:${stage}`}`
     // 签名没变就不折腾，避免无谓的前缀抖动
     if (current && current.signature === signature) {
       return {
@@ -687,7 +695,21 @@ export function apply(ctx, config = {}) {
         warnIfStageTableUnused(names)
         return { applied: false, reason: 'nothing-to-deny', stage, visible: names.length }
       }
-      const dispose = scopedTools.restrict({ deny })
+
+      // 【两种裁剪模式】
+      //   deny  ：把不要的摘掉 —— 依赖"注册表有多大"，实测会算错（38 vs 实际 72）
+      //   allow ：只留要的 —— 不关心总数，结果天然可预测
+      // 两者都受 restrict() 的约束：名字必须是已知的全局工具，且不能是保留名 run_code。
+      const mode = restrictMode
+      let dispose
+      if (mode === 'allow') {
+        const deniedSet = new Set(deny)
+        const allow = names.filter((name) => !deniedSet.has(name) && name !== 'run_code')
+        // 一个都不留是很危险的（等于把工具全藏了）；这种情况下退回 deny，至少语义清楚
+        dispose = allow.length > 0 ? scopedTools.restrict({ allow }) : scopedTools.restrict({ deny: names })
+      } else {
+        dispose = scopedTools.restrict({ deny: deny.filter((name) => name !== 'run_code') })
+      }
 
       // 【A/B 三轮实测后的更正】deny 列表按本会话注册表算，restrict() 却作用在更大的共享表上：
       // 注册表 138、deny=100，请求里实际剩 172-100=72。
@@ -698,6 +720,7 @@ export function apply(ctx, config = {}) {
         dispose,
         stage,
         signature,
+        mode,
         denyCount: deny.length,
         visible: names.length,
       })
@@ -706,6 +729,7 @@ export function apply(ctx, config = {}) {
         reason: 'ok',
         stage,
         signature,
+        mode,
         deny: deny.length,
         visible: names.length,
         // 【不报"还剩多少"】三轮 A/B 证明：减法估（38）和 scoped schemas（138）都不等于
@@ -1071,6 +1095,8 @@ export function apply(ctx, config = {}) {
           hintAvailable,
           hintEnabled: hintRuntime && !hintOffSessions.has(key),
           restrictEffective: cfg.enforceByRestrict && guard.safe,
+          // 当前用的裁剪模式：deny（摘不要的）还是 allow（只留要的）
+          restrictMode: cfg.restrictMode === 'allow' ? 'allow' : 'deny',
           restrictedFor: (restrictions.get(key) || {}).stage || '',
           restrictedToolCount: (restrictions.get(key) || {}).denyCount || 0,
         }

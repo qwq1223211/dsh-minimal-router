@@ -3,6 +3,52 @@
 All notable changes to `dsh-minimal-router`.
 Format: [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/).
 
+## [1.14.0] — 2026-10-31
+
+从 DSH 源码里确认了 `restrict()` 的真实签名之后，补上两条**根治性**的改动。
+
+### Added —— `restrictMode: 'allow'`
+
+从 `@deepseek-ai/dsh-tools/lib/index.js` 读到：
+
+```js
+/**
+ * @param filter - global-tool mask: `allow` (keep only) and/or `deny` (remove).
+ */
+restrict(filter) { … }
+```
+
+也就是说 `allow` 一直是支持的，我们只用了一半。
+
+| | `deny`（默认，不变） | `allow`（新增，可选） |
+|---|---|---|
+| 依赖"注册表有多大" | **是** ← 这就是 38/72 错配的根源 | **否** |
+| 结果可预测 | 172−100=72，和算出来的 38 不符 | 恰好等于点名的那些 |
+| 适用 | 想尽量少见工具 | 想要**确定性** |
+
+`restrictMode` 也进了限制签名，所以两种模式互切时会重新计算，不会因为"签名没变"被跳过。
+一个都不留时自动退回 `deny`（全藏工具太危险）。`route_status` 新增 `restrictMode` 字段。
+
+### Fixed —— 保留名 `run_code`
+
+源码里这句是硬拦截：
+
+```js
+if ([...allow ?? [], ...deny ?? []].includes("run_code")) throw new Error(…)
+```
+
+如果用户开了 PTC 模式，`run_code` 会出现在工具表里；我们的 deny 列表一旦包含它，
+**整个 `restrict()` 会抛错**，而我们外层是 try/catch —— 表现就是**静默不裁剪**
+（又是"装了没效果"）。现在 `run_code` 进了 `ALWAYS_ALLOW`（因此不会被算进 deny），
+`allow` 分支也会显式跳过它。3 条测试守着。
+
+### 现状
+
+**288 项测试**（router 181 + guard 21 + probe 31 + fuzz 12 + instrument 31 + install-elsewhere 8 + migration 4）。
+
+> 还没做：**allow vs deny 的真机 A/B**。它需要把 `restrictMode` 改成 `allow` 再重载一次（= 一次全价重建），
+> 跑两个子会话比 `toolsChars`，然后改回来再重载一次。两次重载的账先跟你确认。
+
 ## [1.13.3] — 2026-10-31
 
 按 `docs/AB.md` 跑了 **3 轮**，拿到第一份可以引用的端到端数字；同时**删掉了我自己在 1.13.2 里加的假数字**。

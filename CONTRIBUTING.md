@@ -45,6 +45,24 @@ node scripts/lint.mjs         # 仓库自检（编码、结构、体积）
 放 `examples/<name>.json`，然后 `node scripts/lint.mjs` 会确认它被 `package.json` 的
 `files` 覆盖到；用 `route_init({"preset":"<name>"})` 就能测。
 
+## 包名为什么是 `@local/dsh-minimal-router`
+
+不是随手起的，也不是"没发布"的意思：
+
+- **`@local/` 是本地 link bundle 的约定命名空间**。同一台机器上其他本地包
+  （`cursor-plugin-demo`、`self-adapt`、整套 `unity-*` 共 18 个）都用这个前缀，合计 24 个。
+  单独把某个包改成无前缀名，会让 `dsh.profile.bundles` 里出现一个异类。
+- **`private: true` 是故意的**：防止 `npm publish` 手滑把内部包发出去。
+
+### 如果你要真正发布到 npm
+
+包名这一处要改，而且会级联，所以写清楚：
+
+1. `package.json` → `"name": "@<你的scope>/dsh-minimal-router"`，按需去掉 `private`
+2. **`cordis.patch.yml` 里的 `name:` 必须同步改**（否则 bundle 解析不到模块）
+3. 已安装用户的 profile：`dependencies` 的 key 与 `dsh.profile.bundles` 的条目都要换名，然后重装。
+   **对已装用户是 breaking change——越早改越便宜。**
+
 ## 依赖与入口：这一类 bug 有共同的伪装
 
 它们**在本机 link 安装时 100% 正常**，只在别人机器上炸，而且常常不报错、只是"没效果"。

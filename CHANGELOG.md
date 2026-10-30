@@ -3,6 +3,46 @@
 All notable changes to `dsh-minimal-router`.
 Format: [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/).
 
+## [1.13.1] — 2026-10-31
+
+三件"离顶尖还差什么"里能做的两件半做完了，第三件（改包名）**查完证据后撤回**。
+
+### Added —— A/B 对照（这是最有价值的一件）
+
+- **`scripts/analysis/ab-compare.mjs`**：列出所有会话的真实账单，并对比任意两个：
+  请求数、promptTokens、全价/命中 token、工具声明字节、前缀重建次数、命中率。
+- **`docs/AB.md` 协议**：怎么跑出一对"能比"的会话（同模型、同插件版本、逐字相同的 10 条问题、
+  唯一差异是 `enforceByRestrict`），以及**报告该怎么写才不是自欺**：
+  - 能确定性比较的只有 **工具声明字节**
+  - 命中率能看出"缓存有没有被打断"
+  - **promptTokens 合计不可比**——里面混着"这次对话有多长"
+  - 必须主动列出干扰项（重载插件 = 一次全价重建、模型输出长度不稳定、中途自动切阶段）
+
+### Changed —— README 第一屏重写
+
+原来第一屏是"文档很全"，但没有让人留下来的理由。现在：一句话 → **三条命令** →
+30 秒数字表 → **一段真实探针记录** → 诚实边界。
+
+那段记录用的是真数据：
+
+```json
+{ "inputTokens": 563654, "cacheReadTokens": 5504, "promptTokens": 569158, "hitRate": 0.0097 }
+```
+
+`hitRate 0.97%` 就是"整段上下文按全价重算"的样子——它比任何形容词都更能解释这个插件为什么存在。
+
+### Reverted —— 我关于"包名太业余"的判断是错的
+
+我原本建议把 `@local/dsh-minimal-router` 改成无前缀名。查了 profile 才发现：
+**`@local/` 是本地 link bundle 的约定命名空间**，这台机器上另外 23 个本地包
+（`cursor-plugin-demo`、`self-adapt`、整套 `unity-*`）都用它。
+
+单独改一个会让 `dsh.profile.bundles` 里出现异类，还要同时动 `cordis.patch.yml` 和用户 profile。
+所以**不改**，改为在 `CONTRIBUTING.md` 里写清：为什么是这个名字、`private: true` 是故意的、
+以及真要发 npm 时该改哪三处（含"对已装用户是 breaking change"的提醒）。
+
+> 这条更正本身就是结论：**"看起来业余"和"实际业余"是两回事**，先查再改。
+
 ## [1.13.0] — 2026-10-31
 
 补上产品承诺里最后一块没被量化的东西：**"这个会话到底花了多少"**。

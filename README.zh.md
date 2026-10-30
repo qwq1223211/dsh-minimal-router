@@ -1,4 +1,4 @@
-# 极简路由（dsh-minimal-router）· v1.13.0 · 小白版说明
+# 极简路由（dsh-minimal-router）· v1.13.1 · 小白版说明
 
 [![Tests](https://github.com/qwq1223211/dsh-minimal-router/actions/workflows/test.yml/badge.svg)](https://github.com/qwq1223211/dsh-minimal-router/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
@@ -6,6 +6,46 @@
 [![Tools](https://img.shields.io/badge/tools%20per%20request-165%20%E2%86%92%2066-orange)
 
 > 一句话：**让 AI 一次只看见它当前需要的工具，看不见的就不花钱。**
+
+## 30 秒看懂
+
+三条命令：
+
+```bash
+# 1. 装（挑一条能用的）
+dsh plugin --profile desktop add github:qwq1223211/dsh-minimal-router
+#    或者跟 AI 说：帮我安装这个插件：https://github.com/qwq1223211/dsh-minimal-router
+
+# 2. 重载：设置 → 插件 → 把「极简路由器」关掉再打开   （link 安装不热更新，这步必须做）
+
+# 3. 验证：让 AI 调一次 route_status
+```
+
+装完到底变了什么（纯净新会话，同一台机器、同一个模型）：
+
+| | 装之前 | 装之后 | |
+|---|---|---|---|
+| 每轮发给模型的工具 | 165 | **66** | −99 个 |
+| 工具声明字节 | 131,694 | **43,238** | **−67.2%** |
+| 每轮 promptTokens | 47,885 | **25,688** | −46.4% |
+| 缓存命中率 | — | **99.16%** | |
+
+还有一行数字，是这个插件**存在的理由**——本机探针的真实记录：
+
+```json
+{
+  "tools": 172, "toolsChars": 138711,
+  "inputTokens": 563654, "cacheReadTokens": 5504,
+  "promptTokens": 569158, "hitRate": 0.0097
+}
+```
+
+`hitRate: 0.97%` 的意思是：**整段上下文按全价重算了一遍。**
+插件里所有设计（安全闸门、迟滞、冷却、成本闸门）都是为了让这种行**少出现**。
+这条记录就是我在长会话里重载插件产生的——也就是文档反复强调"别在长会话里装/改插件"的原因。
+
+**它不做什么**（装之前请先看）：不缩系统提示（那才是大头）、省下的多是缓存价 token（账单可能几乎不动）、
+不能和另一个工具路由同时开。
 
 ---
 

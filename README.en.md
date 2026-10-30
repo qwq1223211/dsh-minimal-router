@@ -1,4 +1,4 @@
-# dsh-minimal-router · v1.13.0
+# dsh-minimal-router · v1.13.1
 
 [![Tests](https://github.com/qwq1223211/dsh-minimal-router/actions/workflows/test.yml/badge.svg)](https://github.com/qwq1223211/dsh-minimal-router/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
@@ -6,8 +6,48 @@
 [![Tools](https://img.shields.io/badge/tools%20per%20request-165%20%E2%86%92%2066-orange)](#numbers-same-machine-same-model-measured-with-dsh-cache-probe)
 
 > **Give the model only the tools it needs right now.** Fixed prefix, variable tail.
-> Measured in a fresh session: **165 tools → 66 tools**, **131,694 → 43,238 bytes** (−67.2%),
-> **promptTokens 47,885 → 25,688** (−46.4%) at **99.16%** cache hit.
+
+## 30 seconds
+
+Three commands:
+
+```bash
+# 1. install (choose the one that works for you)
+dsh plugin --profile desktop add github:qwq1223211/dsh-minimal-router
+#    or: tell your agent "install this plugin: https://github.com/qwq1223211/dsh-minimal-router"
+
+# 2. reload: Settings → Plugins → toggle "Minimal Router" off and on  (a link install does not hot-reload)
+
+# 3. verify: ask your agent to call route_status
+```
+
+What changes, measured in a fresh session (same machine, same model):
+
+| | before | after | |
+|---|---|---|---|
+| tools sent per request | 165 | **66** | −99 |
+| tool declarations | 131,694 B | **43,238 B** | **−67.2%** |
+| promptTokens per turn | 47,885 | **25,688** | −46.4% |
+| cache hit rate | — | **99.16%** | |
+
+And the number it exists to protect — a real probe record from this machine:
+
+```json
+{
+  "tools": 172, "toolsChars": 138711,
+  "inputTokens": 563654, "cacheReadTokens": 5504,
+  "promptTokens": 569158, "hitRate": 0.0097
+}
+```
+
+`hitRate: 0.97%` means **the entire context was re-billed at full price**. Every design decision in
+this plugin (`contextGuardThreshold`, `switchConfirmations`, `switchCooldownMs`, the cost gate) exists to
+make that line rare. That record was produced by reloading the plugin in a long session — which is exactly
+why the docs keep saying *don't install or change plugins mid-session*.
+
+**What it does not do** (read this before installing): it does not shrink the system prompt (that is a bigger
+lever), the tokens it saves are mostly cache-priced (so your bill may barely move), and it must not run
+alongside another tool router. [Details](#what-it-does-not-do-avoid-misunderstandings).
 
 A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) host plugin. No build step, no dependencies.
 

@@ -1,4 +1,4 @@
-# 极简路由（dsh-minimal-router）· 小白版说明
+# 极简路由（dsh-minimal-router）· v1.8.0 · 小白版说明
 
 [![Tests](https://github.com/qwq1223211/dsh-minimal-router/actions/workflows/test.yml/badge.svg)](https://github.com/qwq1223211/dsh-minimal-router/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
@@ -61,7 +61,7 @@ DSH 默认会把**所有**插件的工具说明一次性塞给模型。装了几
 
 ### 三组实测数字（同一台机器、同一个模型）
 
-**① 工具：165 → 69**
+**① 工具：165 → 66**
 
 | | 装之前（auto） | 装之后（core 阶段） |
 |---|---|---|
@@ -509,4 +509,4 @@ prefixSig      : 9515b76a    ← 前缀指纹（变了就说明缓存要重建�
 | 切换阶段的一次性代价（小会话） | 约 3,205 token |
 | 切换阶段的一次性代价（**50 万 token 的大会话**） | **约 512,000 token 全价** ⚠️ |
 | 缓存命中率 | 99.16% ~ 99.9% |
-| 自测 | **157 项**（router 105 + guard 21 + probe 31），全绿 |
+| 自测 | **214 项**（router 162 + guard 21 + probe 31），三平台全绿 |

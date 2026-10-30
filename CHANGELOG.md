@@ -3,6 +3,40 @@
 All notable changes to `dsh-minimal-router`.
 Format: [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/).
 
+## [1.8.0] — 2026-10-30
+
+Six failure modes that had never been tested, closed with 7 tests, a CI matrix, and one real fix.
+
+### Fixed
+
+- **Multi-agent state could collide.** `keyOf()` fell back to a single shared `'__global__'` slot for any
+  agent without an `id`. Two windows (or two anonymous subagents) would then share one stage, one dynamic
+  grant and one hint switch — "A switches stage and B's tools get trimmed". Anonymous agents now get a unique
+  key from a `WeakMap`.
+
+### Tested (previously unverified scenarios)
+
+| Scenario | Result |
+|---|---|
+| Two agents alternating `route_stage` | Isolated stage, dynamic grant and hint switch — **test added** |
+| Two anonymous agents (no `id`) | Isolated **(this is the fix above)** |
+| `tools.restrict()` throws | Stage still switches; the reason is reported as `error:…`, not swallowed |
+| Downstream `llm/stream` throws (429 / network) | Earlier chunks pass through, the error propagates unchanged; nothing hangs |
+| 10 malformed stage configs (string, number, Chinese punctuation, junk arrays, …) | No throw; always a structured `{ ok, errors }` |
+| 4 broken JSON files (truncated, Chinese punctuation, BOM, empty) | No throw |
+| Another plugin denies in `pre-execute` | Our plugin calls `next()`, the other plugin's denial wins |
+
+### CI
+
+The matrix now runs **ubuntu / macos / windows × node 20 / 22** (6 jobs), plus a dedicated cross-platform
+job asserting that the data directory is the user's home and that a **Chinese + space** path loads. Windows
+alone was not evidence; this is a plugin for other people's machines.
+
+### Docs
+
+README now states the coexistence boundaries: safe with other `pre-execute` plugins (we always `next()`),
+recommended with `/trim`, **incompatible** with a second tool router, and bisect advice for a message gate.
+
 ## [1.7.0] — 2026-10-30
 
 The tail hint gets a runtime switch, and its cost gets measured instead of argued about.

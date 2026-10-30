@@ -281,6 +281,18 @@ This plugin only **trims before the fact**; it does not compress history. Use `/
 (`dsh-command-context-trim`) or a compaction plugin for that. Cheapest order in a long session:
 `/trim` first, then switch stage — the full-price rebuild then has a smaller base.
 
+### Coexisting with other plugins
+
+| Situation | Behaviour |
+|---|---|
+| Another plugin also decides in `tools/pre-execute` | **Safe.** For tools it allows, this plugin always calls `next()` and never overrides someone else's denial; it only short-circuits when it denies itself |
+| Compaction / `/trim` plugins | **Recommended pairing.** Do not switch stage *while* a compaction is running — compaction reuses the prefix, and moving the tool list under it wastes the work |
+| Another tool router (loadout-style) | **Do not run both.** Two plugins narrowing the same tool set is unpredictable; disable one |
+| A message/QQ gate | Coexists as long as that gate also calls `next()`. If messages stop sending, turn `enforceStage` off first to bisect |
+
+In one line: this plugin always errs toward **denying one time fewer** — if it cannot compute, it allows;
+if a service is missing, it degrades; on an exception it calls `next()`.
+
 ## Configuration
 
 ```yaml

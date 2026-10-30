@@ -1899,6 +1899,162 @@ await test('A/B 产出：提示不能说"会被拦截"（物理摘除时根本�
 })
 
 // ============================================================================
+// 10.15 多 Agent 隔离 / 异常韧性 / 坏配置（六类"没测过"的场景）
+// ============================================================================
+await test('并发：两个 Agent 的阶段、动态授权、提示开关互相独立', async () => {
+  const rt = makeFakeCtx()
+  apply(rt.ctx, { enforceByRestrict: false })
+  const a = rt.makeAgent('win-A')
+  const b = rt.makeAgent('win-B')
+
+  await rt.tools.get('route_stage').execute({ stage: 'core' }, { agent: a })
+  await rt.tools.get('route_stage').execute({ stage: 'art' }, { agent: b })
+
+  const sa = await rt.tools.get('route_status').execute({}, { agent: a })
+  const sb = await rt.tools.get('route_status').execute({}, { agent: b })
+  assertEqual(sa.stage, 'core', 'A 窗口停在 core')
+  assertEqual(sb.stage, 'art', 'B 窗口停在 art')
+
+  // A 收窄工具组，B 必须毫无影响
+  await rt.tools.get('route_use').execute({ groups: ['unity'] }, { agent: a })
+  const sa2 = await rt.tools.get('route_status').execute({}, { agent: a })
+  const sb2 = await rt.tools.get('route_status').execute({}, { agent: b })
+  assertEqual(sa2.dynamicGroups.length, 1, 'A 有动态授权')
+  assertEqual(sb2.dynamicGroups.length, 0, 'B 不该被 A 影响')
+
+  // A 关掉提示，B 不受影响
+  await rt.tools.get('route_hint').execute({ enabled: false }, { agent: a })
+  const sa3 = await rt.tools.get('route_status').execute({}, { agent: a })
+  const sb3 = await rt.tools.get('route_status').execute({}, { agent: b })
+  assertEqual(sa3.hintEnabled, false)
+  assertEqual(sb3.hintEnabled, true, 'B 的提示不该被 A 关掉')
+})
+
+await test('并发：没有 id 的匿名 Agent 也不会共用状态（不再落到 __global__）', async () => {
+  const rt = makeFakeCtx()
+  apply(rt.ctx, { enforceByRestrict: false })
+  const anonA = { ctx: { tools: rt.ctx.tools } }
+  const anonB = { ctx: { tools: rt.ctx.tools } }
+  await rt.tools.get('route_stage').execute({ stage: 'audio' }, { agent: anonA })
+  await rt.tools.get('route_stage').execute({ stage: 'art' }, { agent: anonB })
+  const sa = await rt.tools.get('route_status').execute({}, { agent: anonA })
+  const sb = await rt.tools.get('route_status').execute({}, { agent: anonB })
+  assertEqual(sa.stage, 'audio')
+  assertEqual(sb.stage, 'art')
+})
+
+await test('异常韧性：restrict 抛异常时不崩，返回可诊断的原因', async () => {
+  const rt = makeFakeCtx()
+  apply(rt.ctx, { enforceByRestrict: true })
+  const agent = rt.makeAgent('boom')
+  // 把会话级 restrict 换成"一调就炸"
+  agent.ctx.tools = {
+    schemas: () => [{ name: 'unity_object_create' }, { name: 'read' }],
+    restrict() {
+      throw new Error('模拟底层限制失败')
+    },
+  }
+  const out = await rt.tools.get('route_stage').execute({ stage: 'core' }, { agent })
+  assertEqual(out.ok, true, '阶段该切还是切成功')
+  assert(String(out.restriction.reason).startsWith('error:'), '要把错误原因带出来，而不是吞掉')
+})
+
+await test('异常韧性：llm/stream 的下游报错原样抛出，不被吞掉也不卡住', async () => {
+  const rt = makeFakeCtx()
+  apply(rt.ctx, {})
+  const listener = (rt.listeners.get('llm/stream') || [])[0]
+  assert(typeof listener === 'function', '应该注册了 llm/stream')
+
+  const boom = new Error('模拟 429 / 网络中断')
+  function next() {
+    return (async function* broken() {
+      yield { type: 'text', text: '前半截' }
+      throw boom
+    })()
+  }
+
+  const stream = listener({}, next)
+  const seen = []
+  let caught = null
+  try {
+    for await (const chunk of stream) seen.push(chunk)
+  } catch (error) {
+    caught = error
+  }
+  assertEqual(seen.length, 1, '报错前的 chunk 要照常透传')
+  assertEqual(seen[0].text, '前半截')
+  assert(caught && caught.message === boom.message, '错误必须原样冒出来，不能被插件吞掉')
+})
+
+await test('坏配置：十种畸形输入，一个都不能让加载器抛异常', async () => {
+  const cases = [
+    ['不是对象', 'hello'],
+    ['数组当根', []],
+    ['stages 是字符串', { stages: 'unity' }],
+    ['stages 是数字', { stages: 42 }],
+    ['空 stages', { stages: {} }],
+    ['阶段值是字符串', { stages: { core: 'oops' } }],
+    ['allow 不是数组', { stages: { core: { allow: 'unity' } } }],
+    ['中文标点', { stages: { core: { allow: [] } }, defaultStage: 'core' }],
+    ['数组元素缺 stage', { stages: [{ allow: [] }] }],
+    ['深层垃圾', { stages: { core: { allow: [1, null, {}, ''], keywords: 'x' } } }],
+  ]
+  for (const [label, input] of cases) {
+    let result = null
+    let threw = null
+    try {
+      result = validateStagesConfig(input)
+    } catch (error) {
+      threw = error
+    }
+    assertEqual(threw, null, `「${label}」不该抛异常`)
+    assert(result && typeof result.ok === 'boolean', `「${label}」要返回结构化的结果`)
+    assert(Array.isArray(result.errors), '总是要有 errors 数组')
+    if (!result.ok) assert(result.errors.length > 0, `「${label}」失败时要说明原因`)
+  }
+})
+
+await test('坏配置：文件级的坏 JSON（截断 / 中文标点 / BOM）不抛异常', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'router-badjson-'))
+  try {
+    const broken = {
+      'truncated.json': '{ "stages": { "core": { "allow": [',
+      'chinese-punct.json': '{ "stages"：{ "core"：{ "allow"：[] } } }',
+      'bom.json': '\uFEFF{ "stages": { "core": { "allow": [] } } }',
+      'empty.json': '',
+    }
+    for (const [name, content] of Object.entries(broken)) {
+      const file = join(dir, name)
+      await writeFile(file, content, 'utf8')
+      let threw = null
+      let out = null
+      try {
+        out = loadCustomStagesSync(file)
+      } catch (error) {
+        threw = error
+      }
+      assertEqual(threw, null, `${name} 不该抛异常`)
+      assert(out && typeof out === 'object', `${name} 要返回结构化结果`)
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+await test('生态协同：放行的工具必须调用 next()，不能抢别的插件的决定', async () => {
+  const rt = makeFakeCtx()
+  apply(rt.ctx, { enforceStage: true })
+  const agent = rt.makeAgent('interop')
+  // 另一个插件在下游一律拒绝
+  const decider = rt.listeners.get('tools/pre-execute')
+  decider.push(() => ({ kind: 'deny', reason: '别的插件拒绝了' }))
+
+  const result = await preExecute(rt, { name: 'read', arguments: {}, agent })
+  assertEqual(result.kind, 'deny', '我们的插件放行时必须让下游说话，不能自己返回 allow 盖掉')
+  assertEqual(result.reason, '别的插件拒绝了')
+})
+
+// ============================================================================
 // 11. 配置
 // ============================================================================
 await test('配置：脏数据自动回退，不会把插件搞挂', () => {

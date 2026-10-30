@@ -287,10 +287,24 @@ async function* observeStream(inner, onUsage) {
 }
 
 /** 取会话 key。 */
+// 【多 Agent 隔离】匿名 agent（没有 id）用 WeakMap 各给一个唯一键，
+// 绝不共用 '__global__'——否则两个窗口的状态会互相覆盖（A 切阶段把 B 的工具砍了）。
+const anonKeys = new WeakMap()
+let anonSeq = 0
+
 function keyOf(execOrAgent) {
   if (!execOrAgent || typeof execOrAgent !== 'object') return '__global__'
   const agent = execOrAgent.agent && typeof execOrAgent.agent === 'object' ? execOrAgent.agent : execOrAgent
   if (typeof agent.id === 'string' && agent.id) return agent.id
+  if (agent && typeof agent === 'object') {
+    let assigned = anonKeys.get(agent)
+    if (!assigned) {
+      anonSeq += 1
+      assigned = `__anon_${anonSeq}`
+      anonKeys.set(agent, assigned)
+    }
+    return assigned
+  }
   return '__global__'
 }
 

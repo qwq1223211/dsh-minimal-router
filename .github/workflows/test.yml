@@ -11,12 +11,15 @@ permissions:
 
 jobs:
   test:
-    name: node ${{ matrix.node }}
-    runs-on: ubuntu-latest
+    name: ${{ matrix.os }} · node ${{ matrix.node }}
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        # 20 = 当前 LTS，22 = 下一代 LTS。两个都过，说明没有踩版本边角。
+        # 三个平台都要过：Windows 的路径/盘符、macOS 的 ~、Linux 的大小写敏感，
+        # 三者出问题的姿势各不相同，只测一个平台等于没测。
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        # 20 = 当前 LTS，22 = 下一代 LTS。两个都过，说明没踩版本边角。
         node: [20, 22]
     steps:
       - uses: actions/checkout@v4
@@ -30,11 +33,59 @@ jobs:
         run: node --version
 
       # 分三条跑，失败时能一眼看出是哪个模块挂了。
-      - name: router (105)
+      - name: router
         run: node test/router.test.mjs
 
-      - name: guard (21)
+      - name: guard
         run: node test/guard.test.mjs
 
-      - name: probe (31)
+      - name: probe
         run: node test/probe.test.mjs
+
+  # ---------------------------------------------------------------------------
+  # 跨平台专项：上面是"单元测试在别的系统也能跑"，这里是"数据目录在两个系统上都写得进去"。
+  # 路径拼接（homedir/join）和 ~/.dsh 的创建是真实用户会踩的坑，值得单独验一次。
+  # ---------------------------------------------------------------------------
+  cross-platform:
+    name: 路径专项 · ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 数据目录默认落在用户目录，且能创建
+        shell: bash
+        run: |
+          node --input-type=module -e "
+          import { STATE_DIR, pickProbeDataFile } from './index.js';
+          import { mkdirSync } from 'node:fs';
+          const target = pickProbeDataFile({ dataFile: '' });
+          console.log('STATE_DIR      :', STATE_DIR);
+          console.log('探针默认数据文件:', target);
+          if (target.includes('node_modules') || target.includes('.pnpm')) {
+            throw new Error('数据文件不该落在依赖目录里');
+          }
+          mkdirSync(STATE_DIR, { recursive: true });
+          console.log('用户目录可创建: OK');
+          "
+
+      - name: 中文与空格路径下也能加载
+        shell: bash
+        run: |
+          mkdir -p "测试 目录/子 目录"
+          node --input-type=module -e "
+          import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
+          import { loadCustomStagesSync } from './lib/stages-config.js';
+          const p = '测试 目录/子 目录/custom_stages.json';
+          writeFileSync(p, JSON.stringify({ stages: { core: { allow: [] } } }), 'utf8');
+          const out = loadCustomStagesSync(p);
+          console.log('中文路径加载 ok =', out.ok);
+          if (!out.ok) throw new Error('中文/空格路径加载失败: ' + JSON.stringify(out.errors));
+          rmSync('测试 目录', { recursive: true, force: true });
+          "

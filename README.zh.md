@@ -1,4 +1,4 @@
-# 极简路由（dsh-minimal-router）· v1.12.2 · 小白版说明
+# 极简路由（dsh-minimal-router）· v1.13.0 · 小白版说明
 
 [![Tests](https://github.com/qwq1223211/dsh-minimal-router/actions/workflows/test.yml/badge.svg)](https://github.com/qwq1223211/dsh-minimal-router/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
@@ -483,6 +483,21 @@ prefixSig      : 9515b76a    ← 前缀指纹（变了就说明缓存要重建�
 ```
 
 对 AI 说「调 cache_probe_report」就能看到。**没有这个数字，你永远不知道自己省了多少。**
+
+### 只看当前会话：`scope: "session"`
+
+默认报告是**全部历史**的平均值，对"我现在这个会话花了多少"没什么帮助。加上作用域：
+
+```text
+调 cache_probe_report({"scope": "session"})
+```
+
+返回里会多出 `session`（会话指纹，**只存哈希，不存原始 id**）、`sessionTotal`，
+以及**只统计这个会话**的 `summary`。
+
+> 实测一次：`session: "8c144bfe"`、`sessionTotal: 1`、`lastHitRate: 0.0097`。
+> 那一次恰好是重载插件后的第一个请求 —— **命中率 0.97% 就是"一次全价重建"的样子**。
+> 这也是为什么文档一直强调：长会话里别装/改插件。
 
 ---
 

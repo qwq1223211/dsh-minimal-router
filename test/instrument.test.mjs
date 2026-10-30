@@ -224,6 +224,42 @@ await test('probe: splitWaterfallArgs 把最后一个函数当 next', () => {
   assertEqual(splitWaterfallArgs(undefined).options, undefined, '空参数时 options 是 undefined')
 })
 
+await test('probe: 会话指纹只存哈希，不存原始 sessionId', () => {
+  const withId = describeRequest({ messages: [], tools: [], sessionId: 'sess-abc-123' })
+  assert(typeof withId.session === 'string' && withId.session.length > 0, '有 sessionId 就该有指纹')
+  assertEqual(withId.session.includes('sess-abc-123'), false, '不能把原始 id 落盘')
+  assertEqual(withId.session, describeRequest({ messages: [], tools: [], sessionId: 'sess-abc-123' }).session, '同一会话必须同一个指纹')
+  assert(withId.session !== describeRequest({ messages: [], tools: [], sessionId: 'other' }).session, '不同会话要不同')
+
+  const noId = describeRequest({ messages: [], tools: [] })
+  assertEqual(noId.session, '', '没有 sessionId 时是空串（老记录也是空串）')
+})
+
+await test('probe: makeRecord 会带上会话指纹', () => {
+  const desc = describeRequest({ messages: [], tools: [], sessionId: 's1' })
+  const record = makeRecord(desc, { inputTokens: 1, cacheReadTokens: 1 }, 5)
+  assertEqual(record.session, desc.session)
+  assertEqual(JSON.stringify(JSON.parse(JSON.stringify(record))), JSON.stringify(record), '必须是无损 JSON')
+})
+
+await test('probe: summarize 能只统计指定会话', () => {
+  const a = describeRequest({ messages: [], tools: [], sessionId: 'A' })
+  const b = describeRequest({ messages: [], tools: [], sessionId: 'B' })
+  const records = [
+    makeRecord(a, { inputTokens: 100, cacheReadTokens: 900 }, 1),
+    makeRecord(b, { inputTokens: 900, cacheReadTokens: 100 }, 2),
+    makeRecord(a, { inputTokens: 100, cacheReadTokens: 900 }, 3),
+  ]
+  const all = summarize(records)
+  const onlyA = summarize(records, { session: a.session })
+  assertEqual(all.count, 3, '不传 session 时统计全部')
+  assertEqual(onlyA.count, 2, '传 session 时只统计那一个')
+  assert(onlyA.avgHitRate > 0.5, `A 会话的命中率应该偏高，实际 ${onlyA.avgHitRate}`)
+  assert(onlyA.avgHitRate > summarize(records, { session: b.session }).avgHitRate, 'B 会话命中率更低')
+
+  assertEqual(summarize(records, { session: '不存在的会话' }).count, 0, '查不到会话时是 0，不是全部')
+})
+
 // ===========================================================================
 // 5. 存储：追加 / 读取 / 轮转 / 坏行
 // ===========================================================================

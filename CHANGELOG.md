@@ -3,6 +3,35 @@
 All notable changes to `dsh-minimal-router`.
 Format: [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/).
 
+## [1.13.0] — 2026-10-31
+
+补上产品承诺里最后一块没被量化的东西：**"这个会话到底花了多少"**。
+
+### Added
+
+- **`cache_probe_report({"scope": "session"})`** —— 只统计当前会话。
+  返回新增字段 `scope` / `session`（会话指纹）/ `sessionTotal`，`summary` 变成会话级。
+  默认仍是 `all`，老行为不变。
+- **会话指纹只存哈希**：`describeRequest` 把 `options.sessionId` 过一遍 `fnv1a` 再落盘，
+  **原始 id 不写入文件**（那属于用户数据，没必要留）。老记录该字段是空串，按会话过滤时自然不匹配。
+- `summarize(records, { session })` 支持按会话过滤；查不到时返回 0 而不是回退成全部。
+- 3 项新测试（instrument 28 → 31）：指纹稳定且不含原始 id、`makeRecord` 带上指纹、
+  `summarize` 只统计指定会话且查不到时为 0。
+
+### 真机验证（顺便留下一份活教材）
+
+重载插件后立刻对当前会话跑一次：
+
+```
+session: "8c144bfe"   sessionTotal: 1
+inputTokens: 563,654  cacheReadTokens: 5,504   hitRate: 0.97%
+```
+
+**0.97% 的命中率就是"一次全价重建"的样子** —— 重载插件会让下一轮把整段上下文重算一遍。
+这正是 README 反复强调的"长会话里别装/改插件"的实测依据，现在用户自己也能一键看到。
+
+**284 项测试**，行覆盖率 90.32%。
+
 ## [1.12.2] — 2026-10-31
 
 让文档里的数字**真的可以被别人复现**。之前它们由一个不在仓库里的脚本算出来——那等于无法验证。

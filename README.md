@@ -1,4 +1,4 @@
-# dsh-minimal-router · v1.12.2
+# dsh-minimal-router · v1.13.0
 
 [![Tests](https://github.com/qwq1223211/dsh-minimal-router/actions/workflows/test.yml/badge.svg)](https://github.com/qwq1223211/dsh-minimal-router/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
@@ -171,6 +171,20 @@ define a workflow up front.
 > the tokens this plugin saves are **cache-priced**, so paying one full-price request to save cheap tokens is
 > a net loss. The judgement goes back to the model that is already in the context — it knows what it is doing;
 > one tool lets it say so, at zero extra cost.
+
+### Scope the report to the current session
+
+`cache_probe_report` reports the average over all history by default. To see only this session:
+
+```text
+cache_probe_report({ "scope": "session" })
+```
+
+It returns `session` (a fingerprint — **the raw session id is never written to disk**), `sessionTotal`, and a
+session-scoped `summary`.
+
+> Measured once: `session: "8c144bfe"`, `sessionTotal: 1`, `lastHitRate: 0.0097`. That request happened right
+> after a plugin reload, and **0.97% is exactly what one full-price prefix rebuild looks like**.
 
 ### Verify the hint yourself with `route_hint`
 

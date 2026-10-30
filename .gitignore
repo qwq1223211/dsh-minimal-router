@@ -1,0 +1,14 @@
+# 用户私人配置：你自己的阶段表，不进仓库
+custom_stages.json
+
+# 探针数据（本地账单记录）
+data/
+
+# 编辑器 / 系统
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# 日志
+*.log

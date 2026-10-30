@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Minimal Router",
+    "description": "Auto-tags tools by name, injects a <=200-char stage hint on the context tail (never touching the tool list), rejects out-of-stage calls, and lints code for dead loops before it is written."
+  }
+}

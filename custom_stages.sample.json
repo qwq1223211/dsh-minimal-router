@@ -1,0 +1,293 @@
+{
+  "$schema": "https://example.invalid/dsh-minimal-router/custom_stages.schema.json",
+  "version": 1,
+  "generatedAt": "2026-10-30T10:59:36.063Z",
+  "defaultStage": "auto",
+  "discovered": [
+    {
+      "tag": "meshy",
+      "count": 28,
+      "claimed": true
+    },
+    {
+      "tag": "core",
+      "count": 23,
+      "claimed": false
+    },
+    {
+      "tag": "unity",
+      "count": 21,
+      "claimed": true
+    },
+    {
+      "tag": "ui",
+      "count": 8,
+      "claimed": true
+    },
+    {
+      "tag": "gameplay",
+      "count": 6,
+      "claimed": true
+    },
+    {
+      "tag": "level",
+      "count": 5,
+      "claimed": true
+    },
+    {
+      "tag": "save",
+      "count": 5,
+      "claimed": true
+    },
+    {
+      "tag": "l10n",
+      "count": 4,
+      "claimed": true
+    },
+    {
+      "tag": "perf",
+      "count": 4,
+      "claimed": true
+    },
+    {
+      "tag": "route",
+      "count": 4,
+      "claimed": false
+    },
+    {
+      "tag": "dialogue",
+      "count": 3,
+      "claimed": true
+    },
+    {
+      "tag": "lighting",
+      "count": 3,
+      "claimed": true
+    },
+    {
+      "tag": "quest",
+      "count": 3,
+      "claimed": true
+    },
+    {
+      "tag": "sticker",
+      "count": 3,
+      "claimed": false
+    },
+    {
+      "tag": "uiflow",
+      "count": 3,
+      "claimed": true
+    },
+    {
+      "tag": "uikit",
+      "count": 3,
+      "claimed": true
+    },
+    {
+      "tag": "cache",
+      "count": 2,
+      "claimed": false
+    },
+    {
+      "tag": "enemy",
+      "count": 2,
+      "claimed": true
+    },
+    {
+      "tag": "guard",
+      "count": 2,
+      "claimed": false
+    },
+    {
+      "tag": "player",
+      "count": 2,
+      "claimed": true
+    },
+    {
+      "tag": "cursor",
+      "count": 1,
+      "claimed": false
+    },
+    {
+      "tag": "meme",
+      "count": 1,
+      "claimed": false
+    }
+  ],
+  "stages": {
+    "auto": {
+      "title": "自动",
+      "allow": [],
+      "keywords": []
+    },
+    "core": {
+      "title": "通用",
+      "allow": [],
+      "keywords": [
+        "通用",
+        "基础",
+        "core"
+      ]
+    },
+    "unity-code": {
+      "title": "Unity 代码",
+      "allow": [
+        "unity",
+        "asset",
+        "level",
+        "perf",
+        "save",
+        "lighting",
+        "player",
+        "enemy",
+        "l10n",
+        "gameplay",
+        "dialogue",
+        "quest",
+        "uikit",
+        "uiflow"
+      ],
+      "keywords": [
+        "代码",
+        "脚本",
+        "编译",
+        "报错",
+        "controller",
+        "script",
+        "compile",
+        "c#",
+        "csharp",
+        "unity"
+      ]
+    },
+    "unity-ui": {
+      "title": "Unity UI",
+      "allow": [
+        "unity",
+        "ui",
+        "uikit",
+        "uiflow",
+        "dialogue",
+        "quest"
+      ],
+      "keywords": [
+        "界面",
+        "按钮",
+        "布局",
+        "canvas",
+        "hud",
+        "panel",
+        "面板",
+        "ui"
+      ]
+    },
+    "art": {
+      "title": "美术",
+      "allow": [
+        "art",
+        "meshy",
+        "image",
+        "asset"
+      ],
+      "keywords": [
+        "贴图",
+        "模型",
+        "素材",
+        "美术",
+        "texture",
+        "model",
+        "sprite",
+        "mesh",
+        "icon"
+      ]
+    },
+    "audio": {
+      "title": "音频",
+      "allow": [
+        "audio"
+      ],
+      "keywords": [
+        "音效",
+        "音乐",
+        "audio",
+        "sfx",
+        "bgm"
+      ]
+    }
+  },
+  "suggestions": [
+    {
+      "stage": "route",
+      "title": "route（4 个工具）",
+      "allow": [
+        "route"
+      ],
+      "keywords": [
+        "route"
+      ],
+      "_hint": "把 stage 名和 keywords 改成你平时说的话，然后把它搬到上面的 stages 里"
+    },
+    {
+      "stage": "sticker",
+      "title": "sticker（3 个工具）",
+      "allow": [
+        "sticker"
+      ],
+      "keywords": [
+        "sticker"
+      ],
+      "_hint": "把 stage 名和 keywords 改成你平时说的话，然后把它搬到上面的 stages 里"
+    },
+    {
+      "stage": "cache",
+      "title": "cache（2 个工具）",
+      "allow": [
+        "cache"
+      ],
+      "keywords": [
+        "cache"
+      ],
+      "_hint": "把 stage 名和 keywords 改成你平时说的话，然后把它搬到上面的 stages 里"
+    },
+    {
+      "stage": "guard",
+      "title": "guard（2 个工具）",
+      "allow": [
+        "guard"
+      ],
+      "keywords": [
+        "guard"
+      ],
+      "_hint": "把 stage 名和 keywords 改成你平时说的话，然后把它搬到上面的 stages 里"
+    },
+    {
+      "stage": "cursor",
+      "title": "cursor（1 个工具）",
+      "allow": [
+        "cursor"
+      ],
+      "keywords": [
+        "cursor"
+      ],
+      "_hint": "把 stage 名和 keywords 改成你平时说的话，然后把它搬到上面的 stages 里"
+    },
+    {
+      "stage": "meme",
+      "title": "meme（1 个工具）",
+      "allow": [
+        "meme"
+      ],
+      "keywords": [
+        "meme"
+      ],
+      "_hint": "把 stage 名和 keywords 改成你平时说的话，然后把它搬到上面的 stages 里"
+    }
+  ],
+  "_readme": [
+    "1. 把这个文件另存为 custom_stages.json（去掉 .sample）",
+    "2. 把 suggestions 里需要的条目搬到 stages 里，并改掉 stage 名和 keywords",
+    "3. 在「设置 → 插件」里把「极简路由器」关掉再打开",
+    "4. 改完后用 route_status 确认 claimedTags 里出现了你的新标签"
+  ]
+}

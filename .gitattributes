@@ -1,0 +1,7 @@
+# 统一换行符，避免 Windows/Linux 贡献者产生无意义的改动
+* text=auto eol=lf
+
+# 二进制
+*.png binary
+*.jpg binary
+*.woff2 binary

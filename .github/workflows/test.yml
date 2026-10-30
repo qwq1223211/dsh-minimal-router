@@ -46,6 +46,10 @@ jobs:
       - name: fuzz
         run: node test/fuzz.test.mjs
 
+      # 旧版数据搬家：伪造 HOME + 真实旧布局，端到端验证"一条不丢"
+      - name: migration
+        run: node test/migration.test.mjs
+
       # 仓库自检：编码/BOM/CRLF、package.json 一致性、库代码不打 stdout、体积守卫
       - name: lint
         run: node scripts/lint.mjs

@@ -32,6 +32,7 @@ const SUITES = [
   'test/fuzz.test.mjs',
   'test/instrument.test.mjs',
   'test/install-elsewhere.test.mjs',
+  'test/migration.test.mjs',
 ]
 
 const covDir = mkdtempSync(join(tmpdir(), 'dsh-cov-'))

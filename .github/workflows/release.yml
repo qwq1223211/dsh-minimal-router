@@ -30,6 +30,7 @@ jobs:
           node test/probe.test.mjs
           node test/fuzz.test.mjs
           node test/install-elsewhere.test.mjs
+          node test/migration.test.mjs
 
       - name: 仓库自检
         run: node scripts/lint.mjs

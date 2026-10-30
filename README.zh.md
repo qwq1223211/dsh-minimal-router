@@ -1,4 +1,4 @@
-# 极简路由（dsh-minimal-router）· v1.12.0 · 小白版说明
+# 极简路由（dsh-minimal-router）· v1.12.1 · 小白版说明
 
 [![Tests](https://github.com/qwq1223211/dsh-minimal-router/actions/workflows/test.yml/badge.svg)](https://github.com/qwq1223211/dsh-minimal-router/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
@@ -27,9 +27,13 @@
 dsh plugin --profile desktop add github:qwq1223211/dsh-minimal-router
 ```
 
-> 这条命令本质是把参数**转发给 profile 目录里的 pnpm**。
-> 如果装完之后插件列表里**没有自动出现**它，再对 AI 说一句"把 dsh-minimal-router 这个 bundle 启用"，
-> 或者直接在「设置 → 插件」里手动打开。
+> 这条命令本质是把参数**转发给 profile 目录里的 pnpm**，但 DSH 还会顺手做两件事：
+> **把它加进该 profile 的 `dsh.profile.bundles`**，并初始化 profile（如果不存在）。
+>
+> **这一点已实测**（v1.12.0，全新 profile）：装完 `node_modules/@local/dsh-minimal-router`
+> 里是 34 个文件的**真实目录**（不是 link），profile 的 `package.json` 里自动出现了
+> `"@local/dsh-minimal-router": "github:..."` 和 bundles 条目。
+> 所以正常情况下**不需要**再手动启用一次；装完直接「设置 → 插件 → 关掉再打开」。
 
 ### 装不上？用本地目录兜底（这条一定能成）
 

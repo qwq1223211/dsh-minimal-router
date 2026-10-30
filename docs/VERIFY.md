@@ -36,6 +36,20 @@ dsh plugin --profile fresh add github:qwq1223211/dsh-minimal-router
 
 ## A. 自动安装（干净 profile）
 
+> **已在本机真实验证过一次（v1.12.0）**：全新 profile + `dsh plugin add github:...`，
+> 装出来是 `node_modules/@local/dsh-minimal-router` 这个 **34 个文件的真实目录**（不是 link），
+> profile 的 `package.json` 自动加上了依赖**和** `dsh.profile.bundles` 条目，
+> 探针数据/阶段表都在 `~/.dsh/minimal-router/`（包外），`apply` 不往包里写任何文件，注册 10 个工具。
+>
+> 装完想自己复核，跑一条命令：
+>
+> ```bash
+> node scripts/verify-installed.mjs <profile名>
+> ```
+>
+> 它会检查：文件齐不齐、入口能否 import、`inject` 是否只依赖 tools、
+> 写盘路径是否在包外、`apply` 有没有往包目录写东西、10 个工具是否都注册上。
+
 ```bash
 # 1) 装
 dsh plugin --profile fresh add github:qwq1223211/dsh-minimal-router
@@ -77,8 +91,13 @@ dsh plugin --profile fresh add github:qwq1223211/dsh-minimal-router
 
 ## C. 升级不丢数据（**必须是装过旧版的机器**）
 
+> **已用端到端测试覆盖**（`test/migration.test.mjs`，进 CI）：
+> 子进程把 `HOME` 指到临时目录 → 搭出真实的"旧版布局"（包目录里带 `data/usage.jsonl`）→
+> 从旧包 import → 断言数据出现在 `~/.dsh/minimal-router/`、**条数一条不少**、重复加载不覆盖。
+> 但**真机升级**仍然值得跑一次：它能发现测试伪造不出来的东西（权限、盘符、真实旧数据格式）。
+
 这是唯一一件**干净机器做不了**的验证，也是最该做的——旧版的探针数据写在**包目录里**，
-新版加了一次性搬家逻辑（`resolveProbeDataFile`），**这段代码至今没有被真机验证过**。
+新版加了一次性搬家逻辑（`resolveProbeDataFile`）。
 
 ```bash
 # 1) 先记下旧数据有多少条

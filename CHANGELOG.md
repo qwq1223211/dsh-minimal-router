@@ -3,6 +3,39 @@
 All notable changes to `dsh-minimal-router`.
 Format: [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/).
 
+## [1.12.1] — 2026-10-31
+
+把两件"只能在别人机器上验"的事，用本机能做的办法验掉了；顺手证伪了自己写的一条文档。
+
+### 已验证（不再是"未验证"）
+
+1. **真 pnpm 安装路径**。新建一个 profile 跑
+   `dsh plugin --profile verify-add add github:qwq1223211/dsh-minimal-router`：
+   真的从 GitHub 拉下来、pnpm v11 硬链进 `node_modules/@local/dsh-minimal-router`，
+   **34 个文件的真实目录**（不是 link），`lib/` 12 个文件齐全。
+   从那里 `import` 成功、`apply` 注册 10 个工具、**包目录里没多出任何文件**、
+   写盘路径在 `~/.dsh/minimal-router/`。
+2. **旧版数据搬家**。`test/migration.test.mjs`（4 项，进 CI）：给子进程重定向
+   `HOME`/`USERPROFILE`，搭出真实的旧布局（包目录里带 `data/usage.jsonl`），
+   从旧包 import → 断言数据落到 `~/.dsh/minimal-router/`、**7 条一条不少**、
+   重复加载不覆盖（幂等）。
+
+### 修正了一条错误的文档
+
+我之前在 README 里写"`dsh plugin add` 装完可能还要手动启用 bundle"——**错的**。
+实测：DSH 会把包同时写进 profile 的 `dependencies` **和** `dsh.profile.bundles`，
+并自动初始化 profile。所以正常情况下装完只需要「关掉再打开」。
+
+### Added
+
+- **`scripts/verify-installed.mjs`**：装完之后一条命令复核这份安装。
+  检查文件齐全、入口可 import、`inject` 只依赖 tools、写盘路径在包外、
+  `apply` 不往包目录写文件、10 个工具都注册上。
+- `docs/VERIFY.md` 补上"哪些已经验过、用什么办法验的"，避免下次重复劳动。
+
+**281 项测试**（router 177 + guard 21 + probe 31 + fuzz 12 + instrument 28 +
+install-elsewhere 8 + migration 4），行覆盖率 90.32%。
+
 ## [1.12.0] — 2026-10-31
 
 覆盖率从"不知道"变成"**90.32% 行覆盖，CI 守住 85%**"——而且是用 Node 内置的 V8 coverage 算的，

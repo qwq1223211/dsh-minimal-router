@@ -1,4 +1,4 @@
-# dsh-minimal-router · v1.12.0
+# dsh-minimal-router · v1.12.1
 
 [![Tests](https://github.com/qwq1223211/dsh-minimal-router/actions/workflows/test.yml/badge.svg)](https://github.com/qwq1223211/dsh-minimal-router/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
@@ -31,9 +31,13 @@ Open DSH and tell the AI:
 dsh plugin --profile desktop add github:qwq1223211/dsh-minimal-router
 ```
 
-> This simply forwards its arguments to `pnpm` inside the profile directory.
-> If the plugin does not appear in the list afterwards, ask the agent to enable the
-> `dsh-minimal-router` bundle, or toggle it on under Settings → Plugins.
+> This forwards its arguments to `pnpm` inside the profile directory, and DSH additionally
+> **adds the package to that profile's `dsh.profile.bundles`** and initialises the profile if needed.
+>
+> **Verified** (v1.12.0, brand-new profile): the install lands as a **real directory** of 34 files at
+> `node_modules/@local/dsh-minimal-router` (not a link), and the profile's `package.json` gains both the
+> dependency and the bundle entry. So normally you do **not** need to enable anything by hand — just go to
+> Settings → Plugins and toggle the row off/on.
 
 ### Option 3 · Clone and install locally (always works)
 

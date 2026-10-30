@@ -521,21 +521,24 @@ function makeFakeCtx(options = {}) {
     description: `${name} test tool ${TOOL_PAD}`,
     parameters: { type: 'object', properties: { a: { type: 'string' } } },
   })
-  const BASE_TOOLS = [
-    'read',
-    'write',
-    'unity_object_create',
-    'unity_status',
-    'asset_audit',
-    'perf_snapshot',
-    'ui_add',
-    'meshy_image_to_3d',
-    'audio_generate_sfx',
-    'route_stage',
-    'route_status',
-    'route_reset',
-    'guard_reset',
-  ].map(mkTool)
+  const BASE_TOOLS_NAMES = Array.isArray(options.toolNames)
+    ? options.toolNames
+    : [
+        'read',
+        'write',
+        'unity_object_create',
+        'unity_status',
+        'asset_audit',
+        'perf_snapshot',
+        'ui_add',
+        'meshy_image_to_3d',
+        'audio_generate_sfx',
+        'route_stage',
+        'route_status',
+        'route_reset',
+        'guard_reset',
+      ]
+  const BASE_TOOLS = BASE_TOOLS_NAMES.map(mkTool)
   let denied = new Set()
 
   // DSH 的 restrict() 只能在 agent.ctx 上调（全局调用会被拒绝），
@@ -2052,6 +2055,230 @@ await test('生态协同：放行的工具必须调用 next()，不能抢别的�
   const result = await preExecute(rt, { name: 'read', arguments: {}, agent })
   assertEqual(result.kind, 'deny', '我们的插件放行时必须让下游说话，不能自己返回 allow 盖掉')
   assertEqual(result.reason, '别的插件拒绝了')
+})
+
+// ============================================================================
+// 10.16 P0：否定句不得被当成"显式切换"
+// ============================================================================
+await test('P0：否定句不算显式切换（一句话就能烧钱的漏洞）', () => {
+  for (const text of ['别切到美术', '不要切换到 art', '先不切到 core', '我不想切到美术', "don't switch to art"]) {
+    assertEqual(isExplicitSwitch(text), false, `「${text}」是在拒绝，不是命令`)
+  }
+})
+
+await test('P0：肯定句仍然算显式切换', () => {
+  for (const text of ['切到美术阶段', '切换到美术阶段', '换到 core', 'switch to art']) {
+    assertEqual(isExplicitSwitch(text), true, `「${text}」是命令`)
+  }
+})
+
+await test('P0：一句话里同时有否定和肯定时，按肯定处理', () => {
+  assertEqual(isExplicitSwitch('别切到美术，切到 core'), true, '后半句是真命令')
+})
+
+await test('P0：否定句不会触发阶段切换（走真实入口）', async () => {
+  const rt = makeFakeCtx()
+  apply(rt.ctx, {})
+  const agent = rt.makeAgent('neg-1')
+  const listener = (rt.listeners.get('agent/inbox/claimed') || [])[0]
+  listener({ agent, message: { content: [{ type: 'text', text: '别切到美术' }] } })
+  const status = await rt.tools.get('route_status').execute({}, { agent })
+  assertEqual(status.stage, 'auto', '说了"别切"，就绝不该切')
+})
+
+// ============================================================================
+// 10.17 P0：迟滞的时间窗（不是"连续两次"，而是"短时间内连续两次"）
+// ============================================================================
+await test('P0：两次信号隔太久就重新计数（5 分钟窗）', () => {
+  const arbiter = createSwitchArbiter({ confirmations: 2, cooldownMs: 0, confirmWindowMs: 1000 })
+  const first = arbiter.decide({ key: 'k', detected: 'art', explicit: false, now: 1000 })
+  assertEqual(first.reason, 'pending')
+  // 窗内 → 累计到 2 → 放行
+  const inner = arbiter.decide({ key: 'k', detected: 'art', explicit: false, now: 1500 })
+  assertEqual(inner.reason, 'confirmed')
+
+  // 隔很久 → 重新从 1 开始
+  const other = createSwitchArbiter({ confirmations: 2, cooldownMs: 0, confirmWindowMs: 1000 })
+  other.decide({ key: 'k', detected: 'art', explicit: false, now: 1000 })
+  const stale = other.decide({ key: 'k', detected: 'art', explicit: false, now: 6000 })
+  assertEqual(stale.reason, 'pending', '隔了 5 倍窗宽，要当新任务重新数')
+  assertEqual(stale.pendingCount, 1)
+})
+
+await test('P0：冷却与时间窗的默认值来自实测（60 秒 / 5 分钟）', () => {
+  const arbiter = createSwitchArbiter({})
+  assertEqual(arbiter.cooldownMs, 60000)
+  assertEqual(arbiter.snapshot('nobody').confirmWindowMs, 300000)
+})
+
+await test('P0：route_status 能看到时间窗参数', async () => {
+  const rt = makeFakeCtx()
+  apply(rt.ctx, {})
+  const status = await rt.tools.get('route_status').execute({}, { agent: rt.makeAgent('w1') })
+  assertEqual(status.switchArbiter.confirmWindowMs, 300000)
+  assertEqual(status.switchArbiter.cooldownMs, 60000)
+})
+
+// ============================================================================
+// 10.18 P1：成本闸门的保守系数可配置
+// ============================================================================
+await test('P1：调低保守系数后，原本被拦的切换会放行', async () => {
+  // 同一上下文（2 万 token）：默认系数 1.0 时回本要 20 轮（拦），系数 0.1 时只要 2 轮（放）
+  const strict = makeFakeCtx()
+  apply(strict.ctx, { contextGuardThreshold: 0, switchCostRatio: 1.0 })
+  const agentA = strict.makeAgent('ratio-a')
+  await feedContext(strict, 'ratio-a', 20000)
+  const listenA = (strict.listeners.get('agent/inbox/claimed') || [])[0]
+  listenA({ agent: agentA, message: { content: [{ type: 'text', text: '生成一张贴图' }] } })
+  listenA({ agent: agentA, message: { content: [{ type: 'text', text: '再生成一张贴图' }] } })
+  const statusA = await strict.tools.get('route_status').execute({}, { agent: agentA })
+  assertEqual(statusA.stage, 'auto', '默认保守系数下，2 万 token 也不划算')
+
+  const loose = makeFakeCtx()
+  apply(loose.ctx, { contextGuardThreshold: 0, switchCostRatio: 0.1 })
+  const agentB = loose.makeAgent('ratio-b')
+  await feedContext(loose, 'ratio-b', 20000)
+  const listenB = (loose.listeners.get('agent/inbox/claimed') || [])[0]
+  listenB({ agent: agentB, message: { content: [{ type: 'text', text: '生成一张贴图' }] } })
+  listenB({ agent: agentB, message: { content: [{ type: 'text', text: '再生成一张贴图' }] } })
+  const statusB = await loose.tools.get('route_status').execute({}, { agent: agentB })
+  assertEqual(statusB.stage, 'art', '系数调低之后应该允许切换')
+})
+
+await test('P1：route_status 同时暴露这两个系数', async () => {
+  const rt = makeFakeCtx()
+  apply(rt.ctx, { switchCostRatio: 0.5, switchSavingsPerByte: 0.25 })
+  const status = await rt.tools.get('route_status').execute({}, { agent: rt.makeAgent('ratio-2') })
+  assertEqual(status.switchEconomics.costRatio, 0.5)
+  assertEqual(status.switchEconomics.tokensPerByte, 0.25)
+})
+
+// ============================================================================
+// 10.19 P1：阶段表和实际环境对不上时，主动喊一声
+// ============================================================================
+await test('P1：阶段表认领的标签都不存在时，主动警告一次（不用等用户问）', async () => {
+  const warnings = []
+  const original = console.warn
+  console.warn = (...args) => warnings.push(args.join(' '))
+  try {
+    // 一台"只有 snowluma 工具"的机器：内置表认领的 unity/art/... 一个都不存在
+    const rt = makeFakeCtx({ toolNames: ['read', 'write', 'snowluma_qq_send', 'route_status', 'route_stage'] })
+    apply(rt.ctx, { enforceByRestrict: true })
+    const agent = rt.makeAgent('unused-1')
+    await rt.tools.get('route_stage').execute({ stage: 'core' }, { agent })
+    await rt.tools.get('route_stage').execute({ stage: 'auto' }, { agent })
+    await rt.tools.get('route_stage').execute({ stage: 'core' }, { agent })
+    const hits = warnings.filter((w) => w.includes('一个都不存在'))
+    assertEqual(hits.length, 1, `只该喊一次，实际 ${hits.length}`)
+    assert(hits[0].includes('route_init'), '要告诉用户怎么修')
+  } finally {
+    console.warn = original
+  }
+})
+
+// ============================================================================
+// 10.20 P2：真·集成断言（schemas 会随 restrict 真的变少 / 变回来）
+// ============================================================================
+await test('P2 集成：切到 core 后 schemas 真的变少，unity 工具消失', async () => {
+  const rt = makeFakeCtx()
+  apply(rt.ctx, { enforceByRestrict: true })
+  const agent = rt.makeAgent('int-1')
+  const before = agent.ctx.tools.schemas().length
+  await rt.tools.get('route_stage').execute({ stage: 'core' }, { agent })
+  const after = agent.ctx.tools.schemas().map((t) => t.name)
+  assertEqual(after.length, 6, `core 应该只剩 6 个，实际 ${after.length}`)
+  assertEqual(after.includes('unity_object_create'), false, 'unity 必须消失')
+  assertEqual(after.includes('read'), true, '基础工具要留着')
+  assert(before > after.length)
+})
+
+await test('P2 集成：切回 auto 必须完整恢复（守"先拆旧限制再算新列表"这条）', async () => {
+  const rt = makeFakeCtx()
+  apply(rt.ctx, { enforceByRestrict: true })
+  const agent = rt.makeAgent('int-2')
+  const total = agent.ctx.tools.schemas().length
+  await rt.tools.get('route_stage').execute({ stage: 'core' }, { agent })
+  assert(agent.ctx.tools.schemas().length < total)
+  await rt.tools.get('route_stage').execute({ stage: 'auto' }, { agent })
+  const restored = agent.ctx.tools.schemas().length
+  assertEqual(restored, total, '回到 auto 必须一个不少地还回来（顺序错了就永远回不来）')
+})
+
+await test('P2 集成：route_use 收窄后 schemas 只剩指定组 + 基础 + 逃生门', async () => {
+  const rt = makeFakeCtx()
+  apply(rt.ctx, { enforceByRestrict: true })
+  const agent = rt.makeAgent('int-3')
+  await rt.tools.get('route_use').execute({ groups: ['unity'] }, { agent })
+  const names = agent.ctx.tools.schemas().map((t) => t.name)
+  assert(names.includes('unity_object_create'), 'unity 要留')
+  assertEqual(names.includes('ui_add'), false, 'ui 要摘')
+  assertEqual(names.includes('route_status'), true, '逃生门永远在')
+  assertEqual(names.includes('route_reset'), true, '复位工具永远在')
+})
+
+await test('P2 集成：放开之后恢得到全量', async () => {
+  const rt = makeFakeCtx()
+  apply(rt.ctx, { enforceByRestrict: true })
+  const agent = rt.makeAgent('int-4')
+  const total = agent.ctx.tools.schemas().length
+  await rt.tools.get('route_use').execute({ groups: ['unity'] }, { agent })
+  await rt.tools.get('route_use').execute({ groups: [] }, { agent })
+  assertEqual(agent.ctx.tools.schemas().length, total)
+})
+
+// ============================================================================
+// 10.21 P2：省钱基线（改坏阶段表会让 savings 掉下来，这里会红）
+// ============================================================================
+await test('P2 基线：各省钱阶段的字节削减不得低于记录值（防重构跑偏）', () => {
+  const names = [
+    'read',
+    'write',
+    'unity_object_create',
+    'unity_status',
+    'asset_audit',
+    'perf_snapshot',
+    'ui_add',
+    'meshy_image_to_3d',
+    'audio_generate_sfx',
+    'route_stage',
+    'route_status',
+    'route_reset',
+    'guard_reset',
+  ]
+  const pad = 'x'.repeat(600)
+  const bytesOf = (n) =>
+    JSON.stringify({
+      name: n,
+      description: `${n} test tool ${pad}`,
+      parameters: { type: 'object', properties: { a: { type: 'string' } } },
+    }).length
+  const total = names.reduce((sum, n) => sum + bytesOf(n), 0)
+
+  // 这些基线是实测出来的（不是猜的）。改动阶段表若让削减变少，这里会失败。
+  const baseline = {
+    auto: { deny: 0, ratio: 0 },
+    core: { deny: 7, ratio: 54.2 },
+    'unity-code': { deny: 3, ratio: 23.2 },
+    art: { deny: 5, ratio: 38.7 },
+    audio: { deny: 6, ratio: 46.3 },
+  }
+
+  for (const [stage, expected] of Object.entries(baseline)) {
+    const deny = computeDenyList({
+      toolNames: names,
+      stage,
+      stages: DEFAULT_STAGES,
+      claimed: claimedTags(DEFAULT_STAGES),
+      coreTools: [],
+    })
+    const deniedBytes = deny.reduce((sum, n) => sum + bytesOf(n), 0)
+    const ratio = (deniedBytes / total) * 100
+    assertEqual(deny.length, expected.deny, `${stage} 应摘掉 ${expected.deny} 个工具`)
+    assert(
+      ratio >= expected.ratio - 0.5,
+      `${stage} 的字节削减 ${ratio.toFixed(1)}% 低于基线 ${expected.ratio}%（省钱能力退化了）`,
+    )
+  }
 })
 
 // ============================================================================

@@ -1,0 +1,46 @@
+name: release
+
+# 只在推 tag 的时候跑。发版 = 打 tag + push，Release 由这里自动创建，
+# 不需要再去网页上点 "Draft a new release"（v1.8.0 就是手点的，这步该被自动化）。
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write # 创建 Release 需要写权限
+
+jobs:
+  release:
+    name: 发布 ${{ github.ref_name }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # 发布前必须先绿：一个测试挂着的 tag 不该被发成 Release。
+      - name: 跑全部测试
+        run: |
+          node test/router.test.mjs
+          node test/guard.test.mjs
+          node test/probe.test.mjs
+
+      # 三处版本号必须一致（package.json / 三个 README / CHANGELOG）。
+      # v1.3.0 那次就是这里没校验，README 标题停在旧版本。
+      - name: 校验版本号一致
+        run: node scripts/verify-version.mjs "${{ github.ref_name }}"
+
+      - name: 从 CHANGELOG 生成 Release 正文
+        run: node scripts/changelog-section.mjs "${{ github.ref_name }}" > notes.md
+
+      - name: 创建 GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --title "${{ github.ref_name }}" \
+            --notes-file notes.md \
+            --verify-tag

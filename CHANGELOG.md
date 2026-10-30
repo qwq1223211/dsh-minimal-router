@@ -3,6 +3,62 @@
 All notable changes to `dsh-minimal-router`.
 Format: [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/).
 
+## [1.9.0] — 2026-10-31
+
+The four items from a self-audit: one bug that could burn money with a single sentence, three
+data-driven refinements, and a regression baseline so the savings cannot silently rot.
+
+### Fixed — negation was read as a command (P0)
+
+`isExplicitSwitch("别切到美术")` returned **true**. Since an explicit command bypasses both the hysteresis
+and the cost gate, a user saying **"don't switch to art"** would switch immediately — at full price, in the
+most expensive session. Same for `不要切换到 art`, `先不切到 core`, `don't switch to art`.
+
+A negation immediately before the switch phrase now cancels it; a sentence containing both
+(`"别切到美术，切到 core"`) still counts as a command. 4 tests.
+
+### Changed — hysteresis numbers now come from data (P0)
+
+Analysed the gaps between **88 real switches** (`_tools/analyze-switch-gaps.mjs`):
+
+| | gap |
+|---|---|
+| P25 | 2.0 s |
+| median | 9.0 s |
+| P75 | 81.1 s |
+| P90 | 433 s |
+
+**43% of adjacent switches happened within 5 s, 71% within 60 s** — that is the flapping, quantified.
+
+- `switchCooldownMs` **120 s → 60 s**: covers the ≤60 s flapping mass without making real task switches wait
+  an arbitrary two minutes.
+- New `switchConfirmWindowMs` (**5 min**, above measured P75): two keyword signals further apart than this are
+  a new task, so the confirmation count restarts. Previously "two consecutive signals" had no time bound — the
+  same word an hour later still counted as a confirmation.
+
+### Changed — cost gate knobs are configurable (P1)
+
+`switchCostRatio` (default 1.0 = worst case) and `switchSavingsPerByte` (default 0.3, measured) were hard-coded.
+Both are now config, exposed in `route_status.switchEconomics`. The measured average miss ratio is 0.465, so
+anyone who finds the worst-case assumption too conservative can say so explicitly.
+
+### Changed — the "installed but saves nothing" case now speaks up (P1)
+
+`stageTableUnused` used to exist only inside `route_status` — you had to ask to find out you were wasting a
+plugin slot. Now the first time a stage finds nothing to trim, a one-time console message explains the three
+ways to fix it (preset / scan / `strict`).
+
+### Added — integration tests and a savings baseline (P2)
+
+- The fake runtime already modelled `restrict()` faithfully (visible schemas shrink and restore), so the
+  integration assertions are real: switching to `core` leaves **6 of 13** tools with no `unity_*` present;
+  switching back to `auto` **restores every tool** — the test that would have caught the
+  dispose-before-compute ordering bug.
+- A **byte-level savings baseline** per stage (core 54.2%, audio 46.3%, art 38.7%, unity-code 23.2%) asserts
+  that trimming never regresses. A stage-table change that saves less now fails CI.
+
+7 new tests: router 162 → **177**; **229 total**.
+
 ## [1.8.0] — 2026-10-30
 
 Six failure modes that had never been tested, closed with 7 tests, a CI matrix, and one real fix.

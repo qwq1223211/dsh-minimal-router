@@ -26,10 +26,17 @@
         # 迟滞：随口提到的关键词要连续几次指向同一阶段才真的切（1 = 不迟滞）
         switchConfirmations: 2
         # 冷却：刚切过一次之后，多少毫秒内不再自动切换（0 = 关闭）
-        switchCooldownMs: 120000
+        # 60 秒是量出来的：88 次真实切换里 71% 的相邻切换发生在 60 秒内
+        switchCooldownMs: 60000
+        # 时间窗：两次关键词信号隔太久就当新任务重新计数（默认 5 分钟 > 实测 P75）
+        switchConfirmWindowMs: 300000
         # 成本闸门：自动切换前先算"几轮能回本"，超过这个轮数就不切
         costGateEnabled: true
         switchPaybackTurns: 3
+        # 保守系数：重建成本 = 上下文 × 这个比例（1.0 = 最坏情况；实测平均 0.465）
+        switchCostRatio: 1.0
+        # 每字节工具声明折算多少 token（实测 98,778 字节 ≈ 29,800 token）
+        switchSavingsPerByte: 0.3
         # 降级保护：只有确认模型支持"系统提示追加到历史"才开尾插
         # 开源给别人用时必须保持 true
         requireInHistoryUpdates: true

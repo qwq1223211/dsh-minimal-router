@@ -232,11 +232,20 @@ const CONFIG_DEFAULTS = {
   //   默认 2，用来挡住"在 Unity 代码任务里顺嘴提了一句界面"这种误切换
   switchConfirmations: 2,
   // 【修改这里】★ 冷却：刚切过一次之后，多少毫秒内不再自动切换（0 = 关闭）
-  switchCooldownMs: 120000,
+  //   默认 60 秒 —— 从 88 次真实切换的间隔里量的：71% 的相邻切换发生在 60 秒内
+  switchCooldownMs: 60000,
+  // 【修改这里】★ 时间窗：两次关键词信号相隔超过这个毫秒数，就当新任务重新计数
+  //   默认 5 分钟 —— 大于实测 P75（81 秒），让同一段对话里的连续提到能累加
+  switchConfirmWindowMs: 300000,
   // 【修改这里】★ 成本闸门：自动切换前先算"几轮能回本"，超过这个轮数就不切
   //   依据：615 条真实记录里，切换成本是双峰的（有时 1%，有时 99%），所以按最坏情况估
   costGateEnabled: true,
   switchPaybackTurns: 3,
+  // 【修改这里】保守系数：重建成本按"上下文 × 这个比例"估
+  //   1.0 = 最坏情况（整段全价，默认，最安全）；实测平均值只有 0.465，调低更激进
+  switchCostRatio: 1.0,
+  // 【修改这里】每字节工具声明折算多少 token（实测 98,778 字节 ≈ 29,800 token）
+  switchSavingsPerByte: 0.3,
   // 【修改这里】演示/调试用：强制假装当前模型是这个名字（用来现场演示降级保护）
   //   例：simulateModel: deepseek-v4-pro  → 立刻触发降级警告，且不花一分钱
   simulateModel: '',
@@ -341,6 +350,18 @@ export function normalizeConfig(raw = {}) {
       Number.isFinite(Number(src.switchCooldownMs)) && Number(src.switchCooldownMs) >= 0
         ? Math.trunc(Number(src.switchCooldownMs))
         : CONFIG_DEFAULTS.switchCooldownMs,
+    switchConfirmWindowMs:
+      Number.isFinite(Number(src.switchConfirmWindowMs)) && Number(src.switchConfirmWindowMs) >= 0
+        ? Math.trunc(Number(src.switchConfirmWindowMs))
+        : CONFIG_DEFAULTS.switchConfirmWindowMs,
+    switchCostRatio:
+      Number.isFinite(Number(src.switchCostRatio)) && Number(src.switchCostRatio) >= 0
+        ? Number(src.switchCostRatio)
+        : CONFIG_DEFAULTS.switchCostRatio,
+    switchSavingsPerByte:
+      Number.isFinite(Number(src.switchSavingsPerByte)) && Number(src.switchSavingsPerByte) >= 0
+        ? Number(src.switchSavingsPerByte)
+        : CONFIG_DEFAULTS.switchSavingsPerByte,
     costGateEnabled: src.costGateEnabled !== false,
     accumulateDisclosure: src.accumulateDisclosure === true,
     hintMaxChars:
@@ -510,6 +531,7 @@ export function apply(ctx, config = {}) {
   const switchArbiter = createSwitchArbiter({
     confirmations: cfg.switchConfirmations,
     cooldownMs: cfg.switchCooldownMs,
+    confirmWindowMs: cfg.switchConfirmWindowMs,
     maxSessions: cfg.maxSessions,
   })
   // 最近一次仲裁结果（route_status 里展示）
@@ -542,7 +564,37 @@ export function apply(ctx, config = {}) {
   /** 估算"现在切到这个阶段"的成本 / 收益 / 回本轮数 */
   function estimateForStage(key, stage) {
     const contextTokens = promptTokensBySession.get(key) || 0
-    return estimateSwitchEconomy({ contextTokens, deniedBytes: deniedBytesForStage(stage) })
+    return estimateSwitchEconomy({
+      contextTokens,
+      deniedBytes: deniedBytesForStage(stage),
+      tokensPerByte: cfg.switchSavingsPerByte,
+      rebuildRatio: cfg.switchCostRatio,
+    })
+  }
+
+  /**
+   * 【P1】阶段表和环境对不上时，主动喊一声。
+   *
+   * 以前这个信息只在 route_status 里——用户不问就永远不知道自己在"白装"。
+   * 现在只要第一次出现"没什么可砍"，就检查一次并提醒（只提醒一次）。
+   */
+  let stageTableWarned = false
+  function warnIfStageTableUnused(names) {
+    if (stageTableWarned) return
+    try {
+      const catalog = buildCatalog(names, cfg.coreTools)
+      if ([...claimed].some((tag) => Object.hasOwn(catalog.tags, tag))) return
+      stageTableWarned = true
+      console.warn(
+        '[minimal-router] 当前阶段表认领的标签，在这台机器上一个都不存在 → 永远砍不掉任何工具（看起来装了，其实 0 收益）。\n' +
+          '  三种解法：\n' +
+          '   1) route_init({"preset":"python-data"}) 直接用内置示例（还有 web-dev / writing / qq-chat）\n' +
+          '   2) route_init            扫描你真实环境，生成待编辑的模板\n' +
+          '   3) 给某个阶段加 "strict": true，然后写明 allow —— 连未分类的标签也会一起拒绝',
+      )
+    } catch {
+      // 算不出来就算了，别打扰用户
+    }
   }
 
   function rememberAgent(agent) {
@@ -654,6 +706,7 @@ export function apply(ctx, config = {}) {
       }
 
       if (deny.length === 0) {
+        warnIfStageTableUnused(names)
         return { applied: false, reason: 'nothing-to-deny', stage, visible: names.length }
       }
       const dispose = scopedTools.restrict({ deny })
@@ -985,6 +1038,8 @@ export function apply(ctx, config = {}) {
             enabled: cfg.costGateEnabled,
             contextTokens: promptTokensBySession.get(key) || 0,
             maxPaybackTurns: cfg.switchPaybackTurns,
+            costRatio: cfg.switchCostRatio,
+            tokensPerByte: cfg.switchSavingsPerByte,
             perStage: Object.fromEntries(
               Object.keys(cfg.stages).map((name) => {
                 const economy = estimateForStage(key, name)

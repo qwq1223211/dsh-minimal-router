@@ -368,22 +368,22 @@ await test('提示：auto 阶段的提示很短，且不制造约束感', () => 
   assert(h.text.includes('auto'))
 })
 
-await test('提示：具体阶段会列出允许组和禁止组', () => {
+await test('提示：具体阶段只列可用组，不再列禁止组（A/B 实测：列禁止组会让模型放弃）', () => {
   const h = renderHint({ stage: 'unity-code', stages: STAGES, claimed: CLAIMED })
   assert(h.text.includes('unity-code'))
-  assert(h.text.includes('允许组=unity'))
-  assert(h.text.includes('禁止组='), '要告诉模型哪些组被禁')
-  assert(h.text.includes('route_stage'), '要给出切换方式')
+  assert(h.text.includes('可用组=unity'), '要告诉模型这轮能用什么')
+  assertEqual(h.text.includes('禁止组'), false, '禁止组清单被截断后会误导模型，已移除')
+  assert(h.text.includes('route_stage("auto")'), '要给出一个永远正确的逃生动作')
   assert(h.length <= HINT_LIMIT)
 })
 
-await test('提示：禁止组很多时会压缩成"前 8 个 + 总数"（不把 200 字吃满）', () => {
+await test('提示：标签再多也不会把禁止组塞进提示（长度反而更稳）', () => {
   const many = {}
   for (let i = 0; i < 60; i += 1) many[`tag${i}`] = true
   const claimedBig = new Set(Object.keys(many))
   const h = renderHint({ stage: 'core', stages: { core: { allow: [] } }, claimed: claimedBig })
-  assert(h.text.includes('等60组'), '应该压缩并标出总数')
-  assertEqual(h.truncated, false, '压缩之后不该再被截断')
+  assertEqual(h.text.includes('等60组'), false, '不再有禁止组压缩逻辑')
+  assertEqual(h.truncated, false)
   assert(h.length <= HINT_LIMIT)
 })
 
@@ -1839,6 +1839,63 @@ await test('任务驱动：切阶段会取消动态收窄（两套规则不打�
   await rt.tools.get('route_stage').execute({ stage: 'core' }, { agent })
   const status = await rt.tools.get('route_status').execute({}, { agent })
   assertEqual(status.dynamicGroups.length, 0)
+})
+
+// ============================================================================
+// 10.14 运行时提示开关（A/B 用）
+// ============================================================================
+await test('A/B：route_hint 关掉后不再注入提示，且不影响其它功能', async () => {
+  const rt = makeFakeCtx()
+  apply(rt.ctx, {})
+  const agent = rt.makeAgent('h-on')
+  // 先让这个会话成为"当前会话"（全局兜底提示用的是 lastKey）
+  const listener = (rt.listeners.get('agent/inbox/claimed') || [])[0]
+  listener({ agent, message: { content: [{ type: 'text', text: '好的' }] } })
+  assert(rt.contexts[0].text().length > 0, '默认应该注入')
+
+  const off = await rt.tools.get('route_hint').execute({ enabled: false }, { agent })
+  assertEqual(off.hintEnabled, false)
+  assertEqual(rt.contexts[0].text(), '', '关掉后应该一个字都不注入')
+
+  const on = await rt.tools.get('route_hint').execute({ enabled: true }, { agent })
+  assertEqual(on.hintEnabled, true)
+  assert(rt.contexts[0].text().length > 0, '打开后应该恢复')
+})
+
+await test('A/B：route_hint 不带参数只查询，不改状态', async () => {
+  const rt = makeFakeCtx()
+  apply(rt.ctx, {})
+  const first = await rt.tools.get('route_hint').execute({}, { agent: rt.makeAgent('h-q') })
+  assertEqual(first.hintEnabled, true)
+  const again = await rt.tools.get('route_hint').execute({}, { agent: rt.makeAgent('h-q') })
+  assertEqual(again.hintEnabled, true)
+})
+
+await test('A/B：route_hint 自己不会被收窄摘掉', async () => {
+  const rt = makeFakeCtx()
+  apply(rt.ctx, { enforceByRestrict: true })
+  const agent = rt.makeAgent('h-esc')
+  await rt.tools.get('route_use').execute({ groups: ['unity'] }, { agent })
+  const deny = rt.restricts[rt.restricts.length - 1].deny
+  assertEqual(deny.includes('route_hint'), false)
+})
+
+await test('A/B：route_status 反映提示开关状态', async () => {
+  const rt = makeFakeCtx()
+  apply(rt.ctx, {})
+  const agent = rt.makeAgent('h-st')
+  await rt.tools.get('route_hint').execute({ enabled: false }, { agent })
+  const status = await rt.tools.get('route_status').execute({}, { agent })
+  assertEqual(status.hintEnabled, false)
+  assertEqual(status.hintEffective, false)
+})
+
+await test('A/B 产出：提示不能说"会被拦截"（物理摘除时根本没有拦截这一步）', () => {
+  const out = renderHint({ stage: 'unity-code', stages: DEFAULT_STAGES, claimed: REAL_CLAIMED })
+  assertEqual(out.text.includes('立刻拦截'), false, '工具是被移出列表的，不是调用时报错')
+  assert(out.text.includes('移出列表'), '必须说清它去哪了')
+  assert(out.text.includes('route_stage("auto")'), '逃生动作要指向 auto（永远全放开），不能写死某个具体阶段')
+  assert(out.length <= 200, `仍要受长度上限约束，实际 ${out.length}`)
 })
 
 // ============================================================================

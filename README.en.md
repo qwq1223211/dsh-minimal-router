@@ -146,6 +146,17 @@ define a workflow up front.
 > a net loss. The judgement goes back to the model that is already in the context — it knows what it is doing;
 > one tool lets it say so, at zero extra cost.
 
+### Verify the hint yourself with `route_hint`
+
+```text
+route_hint({ "enabled": false })   # off for THIS session only
+route_hint({ "enabled": true })    # on
+route_hint()                       # query only
+```
+
+Takes effect at runtime, no reload. The hint costs 50–126 tokens per turn (~0.1% of the tool declarations),
+so "the hint is expensive" is arithmetically impossible — only its **behavioural** effect is worth testing.
+
 ```powershell
 # ask the agent:
 route_init

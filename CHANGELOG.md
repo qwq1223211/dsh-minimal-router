@@ -3,6 +3,59 @@
 All notable changes to `dsh-minimal-router`.
 Format: [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/).
 
+## [1.7.0] — 2026-10-30
+
+The tail hint gets a runtime switch, and its cost gets measured instead of argued about.
+
+### Added
+
+- **`route_hint({ enabled })`** — turn the tail hint on or off **for the current session only**, at runtime, no
+  reload. `route_hint()` with no argument just queries. Added to `ALWAYS_ALLOW`, so it survives even the
+  narrowest `route_use` narrowing. This exists so anyone can A/B the hint on their own machine instead of
+  trusting either side of the argument.
+- 4 new tests (router 154; **210 total**).
+
+### Measured: what the hint actually costs
+
+Rendered with the real default stage table (`_tools/hint-cost.mjs`, deterministic — no sampling):
+
+| stage | chars | ~tokens |
+|---|---|---|
+| auto | 71 | ~50 |
+| core | 117 | ~82 |
+| audio | 120 | ~84 |
+| art | 138 | ~97 |
+| unity-ui | 151 | ~106 |
+| unity-code | 180 | ~126 |
+
+Against a real request (137,790 bytes of tool declarations, ~900,000 tokens of context): the hint is
+**0.09% of the tool declarations** and **0.01% of the context**.
+
+Conclusion: "the injected hint is itself a cost problem" is arithmetically false. The only open question was
+its **behavioural** effect, which is what the A/B below tests.
+
+### A/B result: the old hint actively hurt, and it is fixed
+
+Two brand-new sessions, identical task, the only difference being the hint:
+
+| | No hint (arm B) | Hint on (arm A) |
+|---|---|---|
+| `unity_object_create` (forbidden in stage `art`) | **called it** | never called it |
+| What came back | routing denial listing the exact fix: `请立即调用 route_stage("unity-code")` | — |
+| Recovery | **switched stage, then called it again** | **gave up** ("not in my tool list") |
+
+The old hint printed `禁止组=audio,dialogue,enemy,gameplay,l10n,level,lighting,perf 等15组` — and because the
+list was truncated to 8 names, `unity` **was hidden inside "等15组"**. The model read "all these are banned",
+decided the task was impossible, and stopped. The model **without** the hint just tried, received a denial
+that named the tool, the current stage, the allowed groups and the exact call to make, and recovered.
+
+So the hint was competing with the denial message and losing: the denial is precise, the truncated ban list
+is not. The hint now lists **only the allowed groups** plus one universally correct escape
+(`route_stage("auto")`), and shrank from 193 chars to 68–85 chars for typical stages.
+
+Caveat stated plainly: this is n=1 per arm. It is enough to show the old wording could induce giving up, not
+enough to quantify a rate. `route_hint` exists so anyone can repeat it with more samples.
+
 ## [1.6.0] — 2026-10-30
 
 The zero-config path: task-driven narrowing without a stage table.

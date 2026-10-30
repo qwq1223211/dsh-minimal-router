@@ -218,6 +218,8 @@ const CONFIG_DEFAULTS = {
   //   因为在超长上下文里切阶段 = 一次全量前缀重建（几十万 token 全价），非常贵
   //   设 0 表示关闭闸门
   contextGuardThreshold: 100000,
+  // 【修改这里】尾部路由提示总开关（route_hint 可在运行时改，方便 A/B）
+  hintEnabled: true,
   // 【修改这里】尾部提示的字数上限（默认 200）。嫌它啰嗦就调到 60~100。
   hintMaxChars: 200,
   // 【修改这里】上下文达到阈值的多少比例时，提前在控制台预警（0 = 关闭）
@@ -754,6 +756,10 @@ export function apply(ctx, config = {}) {
   // 【可选服务】systemPrompt 缺失时，尾插整个跳过，其余功能照常。
   const systemPromptService = optionalService(ctx, 'systemPrompt')
   const hintAvailable = Boolean(systemPromptService && typeof systemPromptService.context === 'function')
+  // 运行时开关（全局配置的总闸）
+  let hintRuntime = cfg.hintEnabled !== false
+  // 【A/B】按会话单独关掉提示 —— 否则做实验会把别的会话的前缀也改动
+  const hintOffSessions = new Set()
   if (!hintAvailable) {
     console.warn(
       '[minimal-router] 当前环境没有提供 systemPrompt 服务：尾部路由提示已禁用，' +
@@ -767,6 +773,9 @@ export function apply(ctx, config = {}) {
     if (!guard.safe) return ''
     // 【降级】没有 systemPrompt 服务时，同样不注入
     if (!hintAvailable) return ''
+    // 【A/B】运行时被关掉时也不注入（全局总闸 + 本会话单独关）
+    if (!hintRuntime) return ''
+    if (hintOffSessions.has(key)) return ''
     try {
       const snapshot = state.get(key)
       return renderHint({ stage: snapshot.stage, stages: cfg.stages, claimed, limit: cfg.hintMaxChars }).text
@@ -986,8 +995,9 @@ export function apply(ctx, config = {}) {
             systemPromptUpdate: guard.systemPromptUpdate,
           },
           // 尾插和瘦身是否真的在用（降级时都是 false）
-          hintEffective: guard.safe && hintAvailable,
+          hintEffective: guard.safe && hintAvailable && hintRuntime && !hintOffSessions.has(key),
           hintAvailable,
+          hintEnabled: hintRuntime && !hintOffSessions.has(key),
           restrictEffective: cfg.enforceByRestrict && guard.safe,
           restrictedFor: (restrictions.get(key) || {}).stage || '',
           restrictedToolCount: (restrictions.get(key) || {}).denyCount || 0,
@@ -1080,6 +1090,40 @@ export function apply(ctx, config = {}) {
           turns,
           restriction,
           message: `已收窄到 ${groups.join('/')}，${turns} 轮后自动恢复。用完可 route_use({"groups":[]}) 立刻放开。`,
+        }
+      },
+    }),
+  )
+
+  // ------------------------------------------------------------------
+  // 4.6 工具 5：route_hint —— 运行时开关尾部提示（A/B 实验用）
+  // ------------------------------------------------------------------
+  ctx.effect(() =>
+    ctx.tools.register({
+      name: 'route_hint',
+      description:
+        '开/关当前会话的尾部路由提示（运行时生效，不用重载）。用于对比"有提示 vs 无提示"的表现与成本。不带参数则只查询当前状态。',
+      parameters: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          enabled: { type: 'boolean', description: 'true = 注入提示，false = 不注入' },
+        },
+      },
+      output: RENDER,
+      async execute(args, exec) {
+        const key = keyOf(exec)
+        if (args && typeof args.enabled === 'boolean') {
+          if (args.enabled) hintOffSessions.delete(key)
+          else hintOffSessions.add(key)
+        }
+        return {
+          hintEnabled: hintRuntime && !hintOffSessions.has(key),
+          hintAvailable,
+          degraded: !guard.safe,
+          sample: hintFor(key),
+          scope: '本会话（不影响其它会话）',
+          note: '改动从下一次请求开始生效（本轮的提示已经发出去了）。',
         }
       },
     }),

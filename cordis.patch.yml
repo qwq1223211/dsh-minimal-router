@@ -52,7 +52,7 @@
         # 探针模块（只在 probeEnabled: true 时生效）
         # ======================================================================
         probe:
-          # 留空 = 落在包目录下的 data/usage.jsonl
+          # 留空 = 落在 ~/.dsh/minimal-router/usage.jsonl（包外面，重装不会丢）
           dataFile: ''
           # 每次请求在控制台打一行（长期用建议关掉）
           logToConsole: true

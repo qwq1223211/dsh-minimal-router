@@ -3,6 +3,28 @@
 All notable changes to `dsh-minimal-router`.
 Format: [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/).
 
+## [1.2.1] — 2026-10-30
+
+Two dependency/entry robustness fixes, found by auditing the package the way a fresh install would see it.
+
+### Fixed
+
+- **Runtime data no longer lives inside the package.** The probe wrote to `<package>/data/usage.jsonl` and
+  `route_init` wrote `custom_stages.sample.json` next to the package. That is fine for a `link:` install and
+  **broken for a real dependency install**, where pnpm places the package under `node_modules/.pnpm/<hash>/` —
+  a directory that is replaced on upgrade and may not even be writable. Both now default to
+  `~/.dsh/minimal-router/`, and the existing probe history is copied over once on first run.
+- **`systemPrompt` is no longer a hard dependency.** `inject` was `['tools', 'systemPrompt']`, so on any host
+  or preset that does not provide `systemPrompt`, the *entire* plugin failed to load — taking the circuit
+  breaker and the probe down with it. It is now resolved optionally: without it, only the tail hint is
+  disabled (with a console explanation), while out-of-stage denial, dead-loop lint, the breaker and the probe
+  keep working. `route_status` reports `hintAvailable`.
+
+### Verified by audit
+
+Zero external imports (only `node:` builtins and relative files), `main` and `exports["."]` agree, every entry
+in `files` exists, and the package imports cleanly and exposes `apply` + `inject`.
+
 ## [1.2.0] — 2026-10-30
 
 Turns the "should we switch?" question into an economic calculation, using data mined from the

@@ -50,6 +50,9 @@ git clone https://github.com/qwq1223211/dsh-minimal-router.git
 
 能看到一段 JSON（里面有 `stages`、`tagCounts`、`modelGuard`）就说明装好了、且在运行。
 
+> **运行时数据放在 `~/.dsh/minimal-router/`**（探针历史、你的 `custom_stages.json`），
+> 不在插件目录里面——因为真实依赖安装时，插件目录会被升级替换掉。
+
 ---
 
 ## 一、我为什么要装这个？

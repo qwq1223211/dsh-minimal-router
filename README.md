@@ -1,4 +1,4 @@
-# dsh-minimal-router · v1.2.0
+# dsh-minimal-router · v1.2.1
 
 [![Tests](https://github.com/qwq1223211/dsh-minimal-router/actions/workflows/test.yml/badge.svg)](https://github.com/qwq1223211/dsh-minimal-router/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
@@ -51,6 +51,9 @@ No registry, no package-name resolution, nothing but the clone. **If options 1 a
 
 Ask the agent for `route_status`. A JSON payload containing `stages`, `tagCounts`, and `modelGuard`
 means the plugin is installed and live.
+
+Runtime data (probe history, your `custom_stages.json`) lives in **`~/.dsh/minimal-router/`**, never inside
+the package — a real dependency install puts the package in a directory that gets replaced on upgrade.
 
 ## Why
 

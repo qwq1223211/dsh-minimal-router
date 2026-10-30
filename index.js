@@ -49,13 +49,50 @@ import {
 } from './lib/stages-config.js'
 import { fileURLToPath } from 'node:url'
 import { writeFile, mkdir } from 'node:fs/promises'
-import { dirname } from 'node:path'
+import { existsSync, mkdirSync, copyFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { homedir } from 'node:os'
+
+/**
+ * 【运行时数据目录】必须放在包外面。
+ *
+ * 为什么：用 `dsh plugin add github:...` 安装时，包会被 pnpm 放进
+ * `node_modules/.pnpm/<hash>/`，那是个**会被重装整体替换**的虚拟目录，
+ * 升级一次数据就没了，也可能根本没有写权限。
+ * link 安装（本地目录）看不出这个问题——所以这个坑只在"别人装了"的时候才炸。
+ */
+export const STATE_DIR = join(homedir(), '.dsh', 'minimal-router')
 
 // 【修改这里】插件在插件管理器里显示的名字
 export const name = 'minimal-router'
 
-// 【修改这里】依赖的服务。systemPrompt 是尾插接口，tools 是拦截接口
-export const inject = ['tools', 'systemPrompt']
+// 【修改这里】依赖的服务。
+// 只硬依赖 tools：它是三个模块共同的基础（注册工具、拦截调用）。
+// systemPrompt 是**可选**的——缺了它只丢"尾部提示"，熔断 / 体检 / 探针照常工作。
+// 早期版本把 systemPrompt 写进 inject，结果任何缺这个服务的环境整个插件都加载不了。
+export const inject = ['tools']
+
+/**
+ * 取一个"可选服务"：先试 ctx.get（Cordis 标准），再退回属性访问。
+ * @param {object} ctx
+ * @param {string} name
+ * @returns {any}
+ */
+function optionalService(ctx, name) {
+  try {
+    if (ctx && typeof ctx.get === 'function') {
+      const value = ctx.get(name)
+      if (value) return value
+    }
+  } catch {
+    // 没 provide 会抛，忽略
+  }
+  try {
+    return ctx ? ctx[name] : undefined
+  } catch {
+    return undefined
+  }
+}
 
 // ============================================================================
 // 【修改这里】阶段定义 —— 想加阶段/改关键词就在这里改
@@ -158,7 +195,7 @@ const CONFIG_DEFAULTS = {
   // 【修改这里】最多记住多少个会话的阶段状态
   maxSessions: 200,
   // 【修改这里】自定义阶段表文件（不存在就是正常的，会回退内置表）
-  customStagesFile: fileURLToPath(new URL('./custom_stages.json', import.meta.url)),
+  customStagesFile: join(STATE_DIR, 'custom_stages.json'),
   // 【修改这里】基础工具名单：这些永不参与阶段管理
   coreTools: [...DEFAULT_CORE_TOOLS],
   // 【修改这里】★ 安全闸门：会话上下文超过这个 token 数，就拦住"切阶段"
@@ -316,6 +353,46 @@ export function collectStrings(value, options = {}) {
 
   walk(value, 0)
   return out
+}
+
+/**
+ * 决定探针数据文件的位置（纯函数，好测）。
+ *
+ * 【坑】别写成 `{ dataFile: 计算值, ...cfg.probe }` —— 配置里 `dataFile: ''`
+ * 会把算好的路径覆盖成空串，然后探针就回退到包目录里去了（实测踩过）。
+ *
+ * @param {{dataFile?:string}} probeConfig
+ * @param {string} [stateDir]
+ * @returns {string}
+ */
+export function pickProbeDataFile(probeConfig = {}, stateDir = STATE_DIR) {
+  const explicit =
+    probeConfig && typeof probeConfig.dataFile === 'string' ? probeConfig.dataFile.trim() : ''
+  return explicit || join(stateDir, 'usage.jsonl')
+}
+
+/**
+ * 探针数据文件：优先用户目录。
+ *
+ * 老版本把数据写在**包目录内部**（`<包>/data/usage.jsonl`）。
+ * link 安装时没感觉，但真实依赖安装时那是个随时会被重装替换的虚拟目录。
+ * 所以这里做一次一次性搬家：新位置没有、老位置有 → 复制过去。
+ *
+ * @param {string} target 新的目标路径
+ * @returns {string}
+ */
+function resolveProbeDataFile(target) {
+  try {
+    if (existsSync(target)) return target
+    const legacy = fileURLToPath(new URL('./data/usage.jsonl', import.meta.url))
+    if (!existsSync(legacy)) return target
+    mkdirSync(dirname(target), { recursive: true })
+    copyFileSync(legacy, target)
+    console.info(`[minimal-router] 已把探针历史从包目录搬到用户目录：${target}`)
+    return target
+  } catch {
+    return target
+  }
 }
 
 export function apply(ctx, config = {}) {
@@ -584,10 +661,22 @@ export function apply(ctx, config = {}) {
     // 读不到就保持"未确认 = 不安全"，等第一次真实请求再判定
   }
 
+  // 【可选服务】systemPrompt 缺失时，尾插整个跳过，其余功能照常。
+  const systemPromptService = optionalService(ctx, 'systemPrompt')
+  const hintAvailable = Boolean(systemPromptService && typeof systemPromptService.context === 'function')
+  if (!hintAvailable) {
+    console.warn(
+      '[minimal-router] 当前环境没有提供 systemPrompt 服务：尾部路由提示已禁用，' +
+        '但越界拦截 / 死循环体检 / 熔断 / 探针仍然正常工作。',
+    )
+  }
+
   /** 生成某个会话的尾部提示文本（每次组装都会调用）。 */
   function hintFor(key) {
     // 【降级】模型不支持 in-history 时，一个字都不注入
     if (!guard.safe) return ''
+    // 【降级】没有 systemPrompt 服务时，同样不注入
+    if (!hintAvailable) return ''
     try {
       const snapshot = state.get(key)
       return renderHint({ stage: snapshot.stage, stages: cfg.stages, claimed }).text
@@ -600,13 +689,15 @@ export function apply(ctx, config = {}) {
   // 1. 尾插：注册路由提示（全局兜底 + 每会话覆盖）
   //    名字相同 → 会话级的会 shadow 掉全局的，所以不会重复出现两段提示。
   // ------------------------------------------------------------------
-  ctx.effect(() =>
-    ctx.systemPrompt.context({
-      name: 'minimal-router:stage',
-      order: 950,
-      text: () => hintFor(lastKey),
-    }),
-  )
+  if (hintAvailable) {
+    ctx.effect(() =>
+      systemPromptService.context({
+        name: 'minimal-router:stage',
+        order: 950,
+        text: () => hintFor(lastKey),
+      }),
+    )
+  }
 
   /** 给一个具体会话注册专属提示（拿不到 agent.ctx 就跳过，靠全局兜底）。 */
   function registerAgentHint(agent) {
@@ -791,7 +882,8 @@ export function apply(ctx, config = {}) {
             systemPromptUpdate: guard.systemPromptUpdate,
           },
           // 尾插和瘦身是否真的在用（降级时都是 false）
-          hintEffective: guard.safe,
+          hintEffective: guard.safe && hintAvailable,
+          hintAvailable,
           restrictEffective: cfg.enforceByRestrict && guard.safe,
           restrictedFor: (restrictions.get(key) || {}).stage || '',
           restrictedToolCount: (restrictions.get(key) || {}).denyCount || 0,
@@ -1101,10 +1193,10 @@ export function apply(ctx, config = {}) {
   }
   if (cfg.probeEnabled) {
     try {
-      // 探针的数据目录固定在包根目录下的 data/
+      // 探针数据放在用户目录（包外面）；显式配置了 dataFile 就尊重它
       const probeConfig = {
-        dataFile: fileURLToPath(new URL('./data/usage.jsonl', import.meta.url)),
         ...cfg.probe,
+        dataFile: resolveProbeDataFile(pickProbeDataFile(cfg.probe)),
       }
       applyProbe(ctx, probeConfig)
     } catch (error) {

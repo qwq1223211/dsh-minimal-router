@@ -38,7 +38,7 @@ import {
   loadCustomStagesSync,
 } from '../lib/stages-config.js'
 import { estimateSwitchEconomy, decideByEconomy, describeEconomy } from '../lib/cost.js'
-import { apply, normalizeConfig, collectStrings, DEFAULT_STAGES } from '../index.js'
+import { apply, normalizeConfig, collectStrings, DEFAULT_STAGES, inject, STATE_DIR, pickProbeDataFile } from '../index.js'
 
 const GREEN = '\x1b[32m'
 const RED = '\x1b[31m'
@@ -579,12 +579,14 @@ function makeFakeCtx(options = {}) {
         throw new Error('tools.restrict() requires a scoped context (agent.ctx)')
       },
     },
-    systemPrompt: {
-      context(definition) {
-        contexts.push(definition)
-        return () => {}
-      },
-    },
+    systemPrompt: options.noSystemPrompt
+      ? undefined
+      : {
+          context(definition) {
+            contexts.push(definition)
+            return () => {}
+          },
+        },
     get(name) {
       if (name === 'agentDefaultModel' && model) {
         return { currentSelection: () => ({ provider, model }) }
@@ -1498,6 +1500,77 @@ await test('成本集成：route_status 能列出每个阶段的回本账', asyn
   assertEqual(status.switchEconomics.contextTokens, 100000)
   assert(typeof status.switchEconomics.perStage.art === 'object', '每个阶段都要有账')
   assertEqual(status.switchEconomics.perStage.art.paybackTurns > 0, true)
+})
+
+// ============================================================================
+// 10.9 依赖与入口的健壮性（缺 systemPrompt 不能整个插件挂掉）
+// ============================================================================
+await test('入口：inject 只硬依赖 tools（systemPrompt 是可选的）', () => {
+  assertEqual(inject.includes('tools'), true)
+  assertEqual(inject.includes('systemPrompt'), false, '不能硬依赖 systemPrompt，否则缺它的环境整个插件加载失败')
+})
+
+await test('入口：运行时数据不在包目录里（否则真实依赖安装会被重装清掉）', () => {
+  const cfg = normalizeConfig({})
+  assert(cfg.customStagesFile.includes('.dsh'), `配置默认应在用户目录，实际 ${cfg.customStagesFile}`)
+  assertEqual(cfg.customStagesFile.includes('node_modules'), false)
+  assertEqual(cfg.customStagesFile.includes('.pnpm'), false)
+  assert(STATE_DIR.includes('.dsh'), 'STATE_DIR 应在 ~/.dsh 下')
+})
+
+await test('入口：缺 systemPrompt 时，工具照常注册、其它模块照常工作', () => {
+  const rt = makeFakeCtx({ noSystemPrompt: true })
+  const warnings = []
+  const original = console.warn
+  console.warn = (...args) => warnings.push(args.join(' '))
+  try {
+    apply(rt.ctx, {})
+    // 路由的 4 个工具还在
+    assert(rt.tools.has('route_stage'))
+    assert(rt.tools.has('route_status'))
+    assert(rt.tools.has('route_reset'))
+    assert(rt.tools.has('route_init'))
+    // 熔断和探针也还在（这正是改注入之前会一起死掉的部分）
+    assert(rt.tools.has('guard_status'), '缺 systemPrompt 不该连累熔断')
+    assert(rt.tools.has('cache_probe_report'), '缺 systemPrompt 不该连累探针')
+    // 一条尾插都没注册
+    assertEqual(rt.contexts.length, 0)
+    // 要给一句人话解释
+    assert(warnings.some((w) => w.includes('systemPrompt')), '要说明为什么尾插被禁用')
+  } finally {
+    console.warn = original
+  }
+})
+
+await test('入口：缺 systemPrompt 时 route_status 会说明 hint 不可用', async () => {
+  const rt = makeFakeCtx({ noSystemPrompt: true })
+  const original = console.warn
+  console.warn = () => {}
+  try {
+    apply(rt.ctx, {})
+    const status = await rt.tools.get('route_status').execute({}, { agent: rt.makeAgent('n1') })
+    assertEqual(status.hintAvailable, false)
+    assertEqual(status.hintEffective, false)
+    assertEqual(status.hint, '')
+    // 拦截照样生效
+    await rt.tools.get('route_stage').execute({ stage: 'core' }, { agent: rt.makeAgent('n1') })
+    const blocked = await preExecute(rt, { name: 'unity_object_create', arguments: {}, agent: rt.makeAgent('n1') })
+    assertEqual(blocked.kind, 'deny', '越界拦截不依赖 systemPrompt')
+  } finally {
+    console.warn = original
+  }
+})
+
+await test('入口：探针数据路径不会被空的 dataFile 覆盖回包目录（实测踩过的坑）', () => {
+  const stateDir = join(tmpdir(), 'fake-state-dir')
+  // 配置里 dataFile: '' 是最常见的情况（patch 里默认就是空串）
+  const fromEmpty = pickProbeDataFile({ dataFile: '' }, stateDir)
+  assertEqual(fromEmpty, join(stateDir, 'usage.jsonl'), '空串必须回退到用户目录，不能回退到包目录')
+  // 显式给了路径就尊重
+  const explicit = pickProbeDataFile({ dataFile: 'D:/my/usage.jsonl' }, stateDir)
+  assertEqual(explicit, 'D:/my/usage.jsonl')
+  // 完全没配也回退到用户目录
+  assertEqual(pickProbeDataFile({}, stateDir), join(stateDir, 'usage.jsonl'))
 })
 
 // ============================================================================

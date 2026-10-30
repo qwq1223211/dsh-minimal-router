@@ -645,6 +645,17 @@ export function apply(ctx, config = {}) {
       guard.warned = key
       console.warn(formatDegradeWarning({ provider, model, reason: cap.reason }))
     }
+    // 【别的部署反馈】trustedModels 是"用户断言"，不是实测。断言错了就是每步全价重建，
+    // 所以命中白名单时也要说一句，别让用户以为插件验证过。
+    if (cap.safe && cap.source === 'trusted' && cfg.warnOnDegrade && guard.warned !== `trusted:${key}`) {
+      guard.warned = `trusted:${key}`
+      console.warn(
+        `[minimal-router] 注意：${model} 是通过 trustedModels 放行的。\n` +
+          `  这意味着"尾部提示安全"是**你声明**的，不是插件实测的。\n` +
+          `  启用后请聊 3 轮再看 cache_probe_report：如果 prefixChanges 开始增长、hitRate 掉到很低，\n` +
+          `  说明这条路由并不支持 in-history —— 请立刻把它从 trustedModels 里删掉。`,
+      )
+    }
     return { safe: cap.safe, reason: cap.reason }
   }
 
@@ -828,6 +839,15 @@ export function apply(ctx, config = {}) {
           tagCounts: catalog.tags,
           // 还没被任何阶段管的工具组（新装的插件会出现在这里；它们目前永远放行）
           unclaimedTags: findUnclaimed({ tagCounts: catalog.tags, claimed }),
+          // 阶段表和环境对不上？——别人的部署最容易撞的坑：
+          // 内置表认领的是 unity/art/...，而这台机器只有 snowluma 之类的标签，
+          // 结果 deny 列表永远是空，看起来"装了但一点没省"，而且完全没有任何报错。
+          stageTableUnused:
+            claimed.size > 0 && ![...claimed].some((tag) => Object.hasOwn(catalog.tags, tag)),
+          stageTableHint:
+            claimed.size > 0 && ![...claimed].some((tag) => Object.hasOwn(catalog.tags, tag))
+              ? '内置阶段表认领的标签在你这里一个都不存在，所以永远不会砍任何工具。请调 route_init 生成模板，或给某个阶段加 strict: true 并写明 allow。'
+              : '',
           // 阶段表从哪来的
           stagesSource: {
             customFile: cfg.customStagesFile,

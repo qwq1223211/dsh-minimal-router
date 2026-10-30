@@ -3,6 +3,34 @@
 All notable changes to `dsh-minimal-router`.
 Format: [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/).
 
+## [1.3.0] — 2026-10-30
+
+Five fixes from a **real deployment on another machine** (different provider, different tool set, no Unity
+at all). Every one of them was a silent failure — the plugin looked installed and reported no error.
+
+### Fixed
+
+- **`trustedModels` only matched a bare model id.** A config written as `bailian/deepseek-v4.1-flash-1017`
+  never matched `options.model` (`deepseek-v4.1-flash-1017`), so the user "enabled" it and stayed degraded
+  without any error. Model names are now normalised on both sides (trim, lowercase, strip `provider/`), and
+  the known-capability lookup uses the same normalised name.
+- **`custom_stages.json` silently rejected the array form.** `{ "stages": [ { "stage": "chat", ... } ] }` is
+  the shape most people write by hand; the validator only accepted an object map, so the whole file was
+  discarded as invalid. Both shapes are accepted now.
+- **A stage table that matches nothing trimmed 0 bytes, silently.** If none of the claimed tags exist in the
+  current environment (e.g. a machine with only QQ tools and no Unity), the deny list is always empty. That
+  looked like "installed but saves nothing" with no diagnostic. `route_status` now reports
+  `stageTableUnused` + `stageTableHint`.
+- **No way to trim unfamiliar tools at all.** Added per-stage `strict: true`: it also denies tags that no
+  stage claims, which is the only way to save anything on a tool set the built-in table knows nothing about.
+  Default stays `false` ("never block the unknown").
+
+### Added
+
+- A one-time console notice when a model is allowed via `trustedModels`, stating plainly that this is the
+  **user's assertion, not a measurement**, and how to verify it (`prefixChanges` / `hitRate` after 3 turns).
+- 8 new tests (router 128 → 136; **188 total**).
+
 ## [1.2.1] — 2026-10-30
 
 Two dependency/entry robustness fixes, found by auditing the package the way a fresh install would see it.

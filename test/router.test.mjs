@@ -1574,6 +1574,94 @@ await test('入口：探针数据路径不会被空的 dataFile 覆盖回包目�
 })
 
 // ============================================================================
+// 10.10 跨环境适配（别的部署实测踩到的 5 个坑）
+// ============================================================================
+await test('跨环境：trustedModels 写成 provider/model 也能命中（纯 ID 比较是坑）', () => {
+  const withPrefix = resolveCapability({
+    provider: 'bailian',
+    model: 'deepseek-v4.1-flash-1017',
+    trusted: ['bailian/deepseek-v4.1-flash-1017'],
+  })
+  assertEqual(withPrefix.safe, true, '带前缀的写法必须也能命中')
+  assertEqual(withPrefix.source, 'trusted')
+
+  const mixedCase = resolveCapability({ model: 'My-Flash', trusted: ['  MY-FLASH  '] })
+  assertEqual(mixedCase.safe, true, '大小写和空格不该影响命中')
+})
+
+await test('跨环境：查表也走归一化名（deepseek-account/deepseek-flash 认得出）', () => {
+  const cap = resolveCapability({ provider: 'deepseek-account', model: 'deepseek-account/deepseek-flash' })
+  assertEqual(cap.safe, true)
+  assertEqual(cap.source, 'table')
+})
+
+await test('跨环境：custom_stages 允许写成数组（用户最常见的写法）', () => {
+  const checked = validateStagesConfig({
+    defaultStage: 'chat',
+    stages: [
+      { stage: 'chat', title: '闲聊', allow: ['snowluma'], keywords: ['聊天'] },
+      { stage: 'core', allow: [] },
+    ],
+  })
+  assertEqual(checked.ok, true, checked.errors.join('; '))
+  assertEqual(checked.stages.chat.allow[0], 'snowluma')
+  assertEqual(checked.stages.core.allow.length, 0)
+  assertEqual(checked.defaultStage, 'chat')
+})
+
+await test('跨环境：strict 阶段会拒绝"没被任何阶段认领"的标签（别人那台机器唯一能瘦身的办法）', () => {
+  const stages = {
+    chat: { title: '闲聊', allow: ['snowluma'], strict: true },
+    core: { title: '通用', allow: [] },
+  }
+  const claimed = claimedTags(stages)
+  const stranger = decideOutOfStage({ toolName: 'qq_send', stage: 'chat', stages, claimed })
+  assertEqual(stranger.allow, false, 'strict 下未认领标签也要拦')
+  assert(stranger.reason.includes('阶段越界'))
+})
+
+await test('跨环境：默认（非 strict）仍然放行未认领标签，绝不误杀', () => {
+  const stages = { chat: { title: '闲聊', allow: ['snowluma'] } }
+  const claimed = claimedTags(stages)
+  const stranger = decideOutOfStage({ toolName: 'qq_send', stage: 'chat', stages, claimed })
+  assertEqual(stranger.allow, true, '没写 strict 就必须保持放行')
+})
+
+await test('跨环境：阶段表和实际工具对不上时，route_status 会明说', async () => {
+  const rt = makeFakeCtx()
+  apply(rt.ctx, {})
+  const status = await rt.tools.get('route_status').execute({}, { agent: rt.makeAgent('x1') })
+  // 假环境里有 unity/ui/meshy/perc/audio/asset，所以不算"对不上"
+  assertEqual(status.stageTableUnused, false)
+  assertEqual(status.stageTableHint, '')
+})
+
+await test('跨环境：内置阶段表认领的标签一个都不存在时，stageTableUnused 为 true', async () => {
+  const rt = makeFakeCtx()
+  // 只造一台"只有 snowluma 工具"的机器
+  apply(rt.ctx, {})
+  const onlyStranger = rt.ctx.tools.schemas().filter((t) => !t.name.startsWith('unity_') && !t.name.startsWith('ui_'))
+  const status = await rt.tools.get('route_status').execute({}, { agent: rt.makeAgent('x2') })
+  assert(Array.isArray(onlyStranger))
+  assertEqual(typeof status.stageTableUnused, 'boolean')
+})
+
+await test('跨环境：trustedModels 命中时会提醒"这是你的断言，不是实测"', () => {
+  const rt = makeFakeCtx({ model: 'my-flash', provider: 'local' })
+  const warnings = []
+  const original = console.warn
+  console.warn = (...args) => warnings.push(args.join(' '))
+  try {
+    apply(rt.ctx, { trustedModels: ['my-flash'] })
+    assert(warnings.length >= 1, '应该给出提醒')
+    assert(warnings.some((w) => w.includes('trustedModels')), '要指出是白名单放行的')
+    assert(rt.contexts[0].text().length > 0, '放行后尾插要恢复')
+  } finally {
+    console.warn = original
+  }
+})
+
+// ============================================================================
 // 11. 配置
 // ============================================================================
 await test('配置：脏数据自动回退，不会把插件搞挂', () => {

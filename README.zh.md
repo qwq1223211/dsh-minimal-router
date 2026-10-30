@@ -223,11 +223,45 @@ probeEnabled: false   # 关掉探针
 - `keywords` 里写你会说的话，中文英文都行
 - 阶段表里**前面**的优先匹配，所以把更具体的放前面
 
+`stages` 写成**对象**或**数组**都行（很多人会自然写成数组，现在两种都认）：
+
+```json
+{ "stages": [ { "stage": "chat", "allow": ["snowluma"] }, { "stage": "core", "allow": [] } ] }
+```
+
+#### ⚠️ 如果你的工具一个都不属于内置阶段（Unity / 美术 / 音频）
+
+内置阶段表认领的标签（`unity`/`ui`/`art`/`meshy`/`image`/`audio`/`asset`…）在你这里可能**一个都不存在**。
+那样 `deny` 列表永远是空的，表现就是**"装了但一个 token 都没省"，而且不报任何错**。
+
+`route_status` 会直接告诉你：
+
+```json
+"stageTableUnused": true,
+"stageTableHint": "内置阶段表认领的标签在你这里一个都不存在……"
+```
+
+**两种解法：**
+
+1. 跑 `route_init`，按生成的模板把**你自己的标签**写进某个阶段（推荐）
+2. 给阶段加 `strict: true` —— 这一条会让它**连"没被任何阶段认领的标签"也一起拒绝**：
+
+```json
+{
+  "defaultStage": "chat",
+  "stages": {
+    "auto":  { "allow": ["snowluma", "snowluma-host"] },
+    "chat":  { "allow": ["snowluma", "snowluma-host"], "strict": true },
+    "core":  { "allow": [] }
+  }
+}
+```
+
+> `strict` 默认 **false**。不写它就是"未分类一律放行"，绝不会误杀；写了它就是"只留我列的"。
+
 改完在「设置 → 插件」里把这行**关掉再打开**，立即生效。
 
-### 为什么不怕"新装的插件没被分类"？
-
-因为有个保护规则：**没被任何阶段认领的标签，永远放行。**
+### 为什么不怕"新装的插件没被分类"？因为有个保护规则：**没被任何阶段认领的标签，永远放行。**
 
 你新装一个 `foobar` 插件，它的标签 `foobar` 没人认领 → 任何阶段都能用 → **绝不会因为它没分类就把你拦死**。等你确认要管它了，再把 `foobar` 写进某个阶段的 `allow`。
 
@@ -279,11 +313,19 @@ probeEnabled: false   # 关掉探针
 
 ```yaml
 # 1) 精确放行：只信任你确认过的模型名（推荐）
+#    写纯模型 ID 就行；带 provider 前缀（bailian/xxx）、大小写不同也能认（内部会归一化）
 trustedModels: ['my-flash', 'qwen-coder-plus']
 
 # 2) 一刀切：全部强行开启（自担风险）
 unsafeForce: true
 ```
+
+> **`trustedModels` 是"你的断言"，不是插件的实测。** 命中白名单时插件会专门提醒一句。
+> 启用后请聊 3 轮再看 `cache_probe_report`：如果 `prefixChanges` 开始涨、`hitRate` 掉到很低，
+> 说明这条路由**并不**支持 in-history —— 立刻把它从白名单里删掉。
+>
+> **配置写在哪个文件**：插件读的是**包内那份** `<包目录>/cordis.patch.yml`，不是 profile 的。
+> 改完必须**重载插件**（设置 → 插件 → 关掉再打开）才生效。
 
 **怎么知道自己的模型支不支持？** 换上去跑两步，然后用 `dsh-cache-probe` 看 `hitRate`：
 - 一直 99%+ → 支持，可以加进 `trustedModels`

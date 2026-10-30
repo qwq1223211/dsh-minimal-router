@@ -1,4 +1,4 @@
-# dsh-minimal-router · v1.2.1
+# dsh-minimal-router · v1.3.0
 
 [![Tests](https://github.com/qwq1223211/dsh-minimal-router/actions/workflows/test.yml/badge.svg)](https://github.com/qwq1223211/dsh-minimal-router/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
@@ -136,6 +136,33 @@ For any tool group that no stage claims, the only safe default is to **allow it*
 `route_init` is the compromise: one scan of *your* tools, one template, about a minute of editing, then routing is automatic forever. It lists every unclaimed group with its tool count, so the decision you are confirming is a small, concrete one.
 
 > One line: it is not lazy. Blind guessing is just more expensive than one minute of confirmation.
+
+### If none of your tools belong to a built-in stage
+
+That is the most common way this plugin "installs but saves nothing, silently": the built-in table claims
+`unity`/`ui`/`art`/`meshy`/`image`/`audio`/`asset`, and if your machine has none of those tags, the deny list
+is always empty. `route_status` now says so out loud:
+
+```json
+"stageTableUnused": true,
+"stageTableHint": "内置阶段表认领的标签在你这里一个都不存在……"
+```
+
+Two ways out:
+
+1. Run `route_init` and put **your own tags** into a stage (recommended), or
+2. Give a stage `"strict": true` — it then also denies tags no stage claims:
+
+```json
+{ "defaultStage": "chat",
+  "stages": {
+    "auto": { "allow": ["snowluma", "snowluma-host"] },
+    "chat": { "allow": ["snowluma", "snowluma-host"], "strict": true }
+  } }
+```
+
+`strict` defaults to **false** (unknown tags are always allowed — never a false positive). `stages` may be an
+object map **or** an array of `{ "stage": ... }` entries; both are accepted.
 
 ## Hard rules (not configurable)
 

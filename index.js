@@ -46,10 +46,26 @@ import {
   mergeStages,
   buildTemplate,
   findUnclaimed,
+  validateStagesConfig,
 } from './lib/stages-config.js'
+
+// 内置示例配置目录（别人可以直接挑一个用，不必从零写 JSON）
+const PRESETS_DIR = fileURLToPath(new URL('./examples/', import.meta.url))
+
+/** 列出可用的内置示例 */
+export function listPresets() {
+  try {
+    return readdirSync(PRESETS_DIR)
+      .filter((name) => name.endsWith('.json'))
+      .map((name) => name.replace(/\.json$/i, ''))
+      .sort()
+  } catch {
+    return []
+  }
+}
 import { fileURLToPath } from 'node:url'
 import { writeFile, mkdir } from 'node:fs/promises'
-import { existsSync, mkdirSync, copyFileSync } from 'node:fs'
+import { existsSync, mkdirSync, copyFileSync, readFileSync, readdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { homedir } from 'node:os'
 
@@ -202,6 +218,10 @@ const CONFIG_DEFAULTS = {
   //   因为在超长上下文里切阶段 = 一次全量前缀重建（几十万 token 全价），非常贵
   //   设 0 表示关闭闸门
   contextGuardThreshold: 100000,
+  // 【修改这里】尾部提示的字数上限（默认 200）。嫌它啰嗦就调到 60~100。
+  hintMaxChars: 200,
+  // 【修改这里】上下文达到阈值的多少比例时，提前在控制台预警（0 = 关闭）
+  contextGuardWarnRatio: 0.8,
   // 【修改这里】★ 迟滞：随口提到的关键词要连续几次指向同一阶段才真的切（1 = 不迟滞）
   //   默认 2，用来挡住"在 Unity 代码任务里顺嘴提了一句界面"这种误切换
   switchConfirmations: 2,
@@ -302,6 +322,16 @@ export function normalizeConfig(raw = {}) {
         ? Math.trunc(Number(src.switchCooldownMs))
         : CONFIG_DEFAULTS.switchCooldownMs,
     costGateEnabled: src.costGateEnabled !== false,
+    hintMaxChars:
+      Number.isFinite(Number(src.hintMaxChars)) && Number(src.hintMaxChars) >= 40
+        ? Math.min(1000, Math.trunc(Number(src.hintMaxChars)))
+        : CONFIG_DEFAULTS.hintMaxChars,
+    contextGuardWarnRatio:
+      Number.isFinite(Number(src.contextGuardWarnRatio)) &&
+      Number(src.contextGuardWarnRatio) >= 0 &&
+      Number(src.contextGuardWarnRatio) <= 1
+        ? Number(src.contextGuardWarnRatio)
+        : CONFIG_DEFAULTS.contextGuardWarnRatio,
     switchPaybackTurns:
       Number.isFinite(Number(src.switchPaybackTurns)) && Number(src.switchPaybackTurns) >= 0
         ? Number(src.switchPaybackTurns)
@@ -447,6 +477,8 @@ export function apply(ctx, config = {}) {
   const promptTokensBySession = new Map()
   // 已经被闸门拦过的会话（用于"只警告一次"）
   const blockedWarned = new Set()
+  // 已经做过"上下文快满了"预警的会话（只提示一次）
+  const contextWarned = new Set()
   // 最近一次被拦下的切换（route_status 里展示，方便排查"为什么阶段没变"）
   let lastBlockedSwitch = null
   // 迟滞仲裁器：抑制"顺嘴提一句就切阶段"的抖动
@@ -690,7 +722,7 @@ export function apply(ctx, config = {}) {
     if (!hintAvailable) return ''
     try {
       const snapshot = state.get(key)
-      return renderHint({ stage: snapshot.stage, stages: cfg.stages, claimed }).text
+      return renderHint({ stage: snapshot.stage, stages: cfg.stages, claimed, limit: cfg.hintMaxChars }).text
     } catch {
       return ''
     }
@@ -948,10 +980,65 @@ export function apply(ctx, config = {}) {
     ctx.tools.register({
       name: 'route_init',
       description:
-        '扫描当前环境的所有工具，生成一份基于真实工具的 custom_stages.json 模板（写成 .sample.json，不会自动加载）。改个名字和关键词就能变成你自己领域的阶段表。',
-      parameters: { type: 'object', additionalProperties: false, properties: {} },
+        '生成阶段配置。不带参数：扫描当前环境的真实工具，写出一份 custom_stages.sample.json 模板（不会自动加载）。带 preset 参数：直接把内置示例配置写成可用的 custom_stages.json（改完要重载插件）。',
+      parameters: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          preset: {
+            type: 'string',
+            description:
+              '内置示例之一：python-data / web-dev / writing / qq-chat。给了它就会直接写出可用的 custom_stages.json。',
+          },
+        },
+      },
       output: RENDER,
-      async execute(_args, exec) {
+      async execute(args, exec) {
+        // ---- 分支 A：用内置示例，直接写一份能用的配置 ----
+        const preset = args && typeof args.preset === 'string' ? args.preset.trim() : ''
+        if (preset) {
+          const available = listPresets()
+          if (!available.includes(preset)) {
+            return {
+              ok: false,
+              error: `没有这个示例：${preset}`,
+              presets: available,
+            }
+          }
+          try {
+            const text = readFileSync(join(PRESETS_DIR, `${preset}.json`), 'utf8')
+            const parsed = JSON.parse(text)
+            const checked = validateStagesConfig(parsed)
+            if (!checked.ok) {
+              return { ok: false, error: `示例自身校验失败：${checked.errors.join('；')}`, presets: available }
+            }
+            const target = cfg.customStagesFile
+            await mkdir(dirname(target), { recursive: true })
+            await writeFile(target, `${JSON.stringify(parsed, null, 2)}\n`, 'utf8')
+            return {
+              ok: true,
+              applied: true,
+              preset,
+              file: target,
+              stages: Object.keys(checked.stages),
+              defaultStage: checked.defaultStage || cfg.defaultStage,
+              requiresReload: true,
+              nextSteps: [
+                '1. 到「设置 → 插件」把「极简路由器」关掉再打开（否则跑的还是旧阶段表）',
+                '2. 说一句「调 route_status」，确认 stages 里出现了你选的示例阶段',
+                '3. 想改成自己的说法：直接编辑上面那个文件里的 keywords',
+              ],
+            }
+          } catch (error) {
+            return {
+              ok: false,
+              error: error && error.message ? error.message : String(error),
+              presets: available,
+            }
+          }
+        }
+
+        // ---- 分支 B：扫描环境，生成模板 ----
         let catalog = { tags: {}, total: 0 }
         try {
           const schemas = typeof ctx.tools.schemas === 'function' ? ctx.tools.schemas() : []
@@ -1177,6 +1264,18 @@ export function apply(ctx, config = {}) {
           if (promptTokensBySession.size > cfg.maxSessions) {
             const oldest = promptTokensBySession.keys().next().value
             if (oldest !== undefined && oldest !== key) promptTokensBySession.delete(oldest)
+          }
+          // 【提前预警】别等用户真想切阶段才拒绝他。
+          // 到阈值的一定比例就提示"该开新会话了"，这条只写控制台、不动 prompt，零成本。
+          const warnRatio = cfg.contextGuardWarnRatio
+          const threshold = cfg.contextGuardThreshold
+          if (warnRatio > 0 && threshold > 0 && total >= threshold * warnRatio && !contextWarned.has(key)) {
+            contextWarned.add(key)
+            console.warn(
+              `[minimal-router] 上下文已达 ${total} token（阈值的 ${Math.round((total / threshold) * 100)}%）。\n` +
+                `  再涨下去，"切阶段"会被安全闸门拒绝——因为那会触发一次全量前缀重建。\n` +
+                `  建议现在开一个新会话继续，把这块上下文留在原地。`,
+            )
           }
         }
       } catch {

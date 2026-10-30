@@ -3,6 +3,30 @@
 All notable changes to `dsh-minimal-router`.
 Format: [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/).
 
+## [1.4.0] — 2026-10-30
+
+Three onboarding and long-session improvements, plus a correction to a claim that was circulating about
+this package.
+
+### Corrected
+
+- **The version requirement is a range, not an exact value.** `engines.dsh` is `>=0.2.1-rc.4`; a guide in
+  circulation told users it must match the host exactly. That is false. (One real caveat *does* apply:
+  semver ranges with a prerelease floor cover later **releases** such as `0.2.2`/`0.3.0`, but not a
+  prerelease of a different tuple such as `0.3.0-rc.1`.)
+
+### Added
+
+- **`examples/` presets** — `python-data`, `web-dev`, `writing`, `qq-chat`. Run
+  `route_init({ "preset": "python-data" })` and it writes a ready-to-use `custom_stages.json` directly,
+  instead of making every new user start from the raw scan. No more "Unity template or nothing".
+- **`hintMaxChars`** (default 200, floor 40) — the tail hint was always capped at a constant; it is now
+  configurable, for people who would rather have a terser prompt.
+- **Proactive long-session warning** — at `contextGuardWarnRatio` (default 0.8) of the safety-gate threshold
+  the plugin prints a one-time console notice telling you to start a new session, instead of staying quiet
+  until a stage switch is refused.
+- 4 new tests (router 136 → 140; **192 total**).
+
 ## [1.3.0] — 2026-10-30
 
 Five fixes from a **real deployment on another machine** (different provider, different tool set, no Unity

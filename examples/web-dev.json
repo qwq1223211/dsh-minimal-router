@@ -1,0 +1,30 @@
+{
+  "defaultStage": "auto",
+  "stages": {
+    "auto": {
+      "title": "自动（不限制）",
+      "allow": [],
+      "keywords": []
+    },
+    "core": {
+      "title": "通用",
+      "allow": [],
+      "keywords": ["通用", "聊天"]
+    },
+    "frontend": {
+      "title": "前端",
+      "allow": ["npm", "vite", "react", "vue", "css", "tailwind"],
+      "keywords": ["前端", "页面", "组件", "样式", "css", "react", "vue", "vite"]
+    },
+    "backend": {
+      "title": "后端 / 接口",
+      "allow": ["docker", "k8s", "nginx", "redis", "postgres", "sql"],
+      "keywords": ["接口", "后端", "部署", "docker", "nginx", "数据库", "服务"]
+    },
+    "git": {
+      "title": "版本控制",
+      "allow": ["git", "gh"],
+      "keywords": ["提交", "分支", "合并", "回滚", "push", "commit", "pr"]
+    }
+  }
+}

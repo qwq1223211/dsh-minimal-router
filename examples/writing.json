@@ -1,0 +1,30 @@
+{
+  "defaultStage": "auto",
+  "stages": {
+    "auto": {
+      "title": "自动（不限制）",
+      "allow": [],
+      "keywords": []
+    },
+    "core": {
+      "title": "通用",
+      "allow": [],
+      "keywords": ["通用", "随便聊聊"]
+    },
+    "writing": {
+      "title": "写作 / 长文",
+      "allow": ["office", "docx", "markdown", "md"],
+      "keywords": ["写", "稿", "文章", "文案", "提纲", "润色", "改写", "扩写"]
+    },
+    "research": {
+      "title": "查资料 / 搜证",
+      "allow": ["web", "search", "fetch", "crawl", "browser"],
+      "keywords": ["查", "搜", "资料", "来源", "引用", "核实", "对比"]
+    },
+    "review": {
+      "title": "审阅 / 校对",
+      "allow": ["lint", "spell", "grammar"],
+      "keywords": ["校对", "错别字", "语病", "通顺", "审阅", "挑错"]
+    }
+  }
+}

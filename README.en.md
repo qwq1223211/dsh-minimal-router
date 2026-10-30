@@ -115,6 +115,17 @@ Tags are derived from tool names (`unity_object_create` → `unity`, `mcp__meshy
 
 ## Bring your own domain
 
+**Easiest path: use a bundled preset.**
+
+```text
+route_init({ "preset": "python-data" })
+```
+
+It writes a ready-to-use `custom_stages.json`; reload the plugin and you are done. Bundled presets:
+`python-data`, `web-dev`, `writing`, `qq-chat`.
+
+Calling `route_init` with no arguments is the other path: scan your environment and emit a template to edit.
+
 ```powershell
 # ask the agent:
 route_init

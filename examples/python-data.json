@@ -1,0 +1,30 @@
+{
+  "defaultStage": "auto",
+  "stages": {
+    "auto": {
+      "title": "自动（不限制）",
+      "allow": [],
+      "keywords": []
+    },
+    "core": {
+      "title": "通用",
+      "allow": [],
+      "keywords": ["通用", "聊天", "随便"]
+    },
+    "python": {
+      "title": "写 Python / 数据处理",
+      "allow": ["python", "py", "notebook", "jupyter", "pandas", "numpy"],
+      "keywords": ["python", "pandas", "numpy", "脚本", "函数", "调试", "报错"]
+    },
+    "data": {
+      "title": "数据分析 / 报表",
+      "allow": ["sql", "db", "database", "postgres", "mysql", "chart", "plot", "excel", "xlsx"],
+      "keywords": ["数据", "分析", "报表", "图表", "sql", "数据库", "透视"]
+    },
+    "writing": {
+      "title": "写文档",
+      "allow": ["office", "docx", "pptx", "markdown", "md"],
+      "keywords": ["文档", "报告", "ppt", "总结", "提纲", "润色"]
+    }
+  }
+}

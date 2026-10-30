@@ -1,0 +1,20 @@
+{
+  "defaultStage": "chat",
+  "stages": {
+    "auto": {
+      "title": "自动（放行 QQ 工具）",
+      "allow": ["snowluma", "snowluma-host"],
+      "keywords": []
+    },
+    "chat": {
+      "title": "QQ 闲聊（放行 QQ 工具）",
+      "allow": ["snowluma", "snowluma-host"],
+      "keywords": ["聊天", "闲聊", "在吗", "你好"]
+    },
+    "core": {
+      "title": "通用（不碰 QQ）",
+      "allow": [],
+      "keywords": ["写代码", "通用"]
+    }
+  }
+}

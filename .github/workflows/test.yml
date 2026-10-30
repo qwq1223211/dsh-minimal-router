@@ -32,7 +32,7 @@ jobs:
       - name: 环境
         run: node --version
 
-      # 分三条跑，失败时能一眼看出是哪个模块挂了。
+      # 分五步跑，失败时能一眼看出是哪个模块挂了。
       - name: router
         run: node test/router.test.mjs
 
@@ -41,6 +41,14 @@ jobs:
 
       - name: probe
         run: node test/probe.test.mjs
+
+      # 模糊测试：约 8400 个确定性随机输入，验证"绝不抛异常 + 不变量成立"
+      - name: fuzz
+        run: node test/fuzz.test.mjs
+
+      # 仓库自检：编码/BOM/CRLF、package.json 一致性、库代码不打 stdout、体积守卫
+      - name: lint
+        run: node scripts/lint.mjs
 
   # ---------------------------------------------------------------------------
   # 跨平台专项：上面是"单元测试在别的系统也能跑"，这里是"数据目录在两个系统上都写得进去"。

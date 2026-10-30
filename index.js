@@ -33,6 +33,7 @@ import {
 } from './lib/classify.js'
 import { createStageState, textOfMessage, detectStage, isExplicitSwitch, createSwitchArbiter } from './lib/stage.js'
 import { estimateSwitchEconomy, decideByEconomy, describeEconomy } from './lib/cost.js'
+import { registerDynamicTools } from './lib/tools-dynamic.js'
 import { renderHint, HINT_LIMIT } from './lib/prompt.js'
 import { scanCode, formatFindings } from './lib/lint.js'
 import { resolveCapability, formatDegradeWarning } from './lib/model-guard.js'
@@ -47,23 +48,13 @@ import {
   buildTemplate,
   findUnclaimed,
   validateStagesConfig,
+  listPresets,
+  readPreset,
 } from './lib/stages-config.js'
-
-// 内置示例配置目录（别人可以直接挑一个用，不必从零写 JSON）
-const PRESETS_DIR = fileURLToPath(new URL('./examples/', import.meta.url))
-
-/** 列出可用的内置示例 */
-export function listPresets() {
-  try {
-    return readdirSync(PRESETS_DIR)
-      .filter((name) => name.endsWith('.json'))
-      .map((name) => name.replace(/\.json$/i, ''))
-      .sort()
-  } catch {
-    return []
-  }
-}
 import { fileURLToPath } from 'node:url'
+
+// 内置示例的实现在 lib/stages-config.js（避免 index.js 继续膨胀），这里只是对外重新导出
+export { listPresets }
 import { writeFile, mkdir } from 'node:fs/promises'
 import { existsSync, mkdirSync, copyFileSync, readFileSync, readdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -1076,127 +1067,65 @@ export function apply(ctx, config = {}) {
   )
 
   // ------------------------------------------------------------------
-  // 4. 工具 3：route_reset —— 逃生门（永远放行）
+  // 4~4.6 复位 / 按需收窄 / 提示开关 —— 定义搬到 lib/tools-dynamic.js，
+  //       这里只注入依赖（状态操作仍留在本文件，避免把闭包搬来搬去）
   // ------------------------------------------------------------------
-  ctx.effect(() =>
-    ctx.tools.register({
-      name: 'route_reset',
-      description: '把当前会话的阶段复位成默认值（auto），解除一切阶段拦截。逃生门，永远不被拦截。',
-      parameters: { type: 'object', additionalProperties: false, properties: {} },
-      output: RENDER,
-      async execute(_args, exec) {
-        const key = keyOf(exec)
-        const before = state.get(key)
-        state.reset(key)
-        switchArbiter.reset(key)
-        disclosedTags.delete(key)
-        dynamicGrants.delete(key)
-        lastArbiterDecision = null
-        lastLintHit = ''
-        const restriction = refreshRestriction(key, exec && exec.agent)
-        return {
-          reset: true,
-          previousStage: before.stage,
-          stage: state.get(key).stage,
-          restriction,
-          message: '已复位到默认阶段，可以继续。',
-        }
-      },
-    }),
-  )
+  registerDynamicTools(ctx, {
+    RENDER,
+    keyOf,
 
-  // ------------------------------------------------------------------
-  // 4.4 工具 4：route_use —— 任务驱动的一次性收窄（不需要任何阶段配置）
-  //
-  // 【为什么要有它】预设阶段要求用户"先知道自己要做什么"。
-  // route_use 把这份判断交回给**模型自己**：这一轮需要哪几组，就只要哪几组，
-  // 过期自动放开。零配置、可撤销，不依赖任何 custom_stages.json。
-  // ------------------------------------------------------------------
-  ctx.effect(() =>
-    ctx.tools.register({
-      name: 'route_use',
-      description:
-        '按需收窄当前会话可见的工具组（不需要预设阶段）。只保留指定组 + 基础工具，其余工具被临时摘掉；到期或 route_reset 后自动恢复。传空数组可立即放开。组名见 route_status 的 tagCounts。',
-      parameters: {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          groups: {
-            type: 'array',
-            items: { type: 'string' },
-            description: '要保留的工具组名（如 ["unity"]）；传空数组等于立即放开全部',
-          },
-          turns: {
-            type: 'integer',
-            minimum: 1,
-            maximum: 20,
-            description: '保持多少轮（默认 3）。到点自动恢复，不用记着撤销。',
-          },
-        },
-        required: ['groups'],
-      },
-      output: RENDER,
-      async execute(args, exec) {
-        const key = keyOf(exec)
-        const raw = args && Array.isArray(args.groups) ? args.groups : []
-        const groups = raw
-          .filter((g) => typeof g === 'string' && g.trim())
-          .map((g) => g.trim().toLowerCase())
-        const turnsRaw = args && Number.isFinite(Number(args.turns)) ? Math.trunc(Number(args.turns)) : 3
-        const turns = Math.min(20, Math.max(1, turnsRaw))
+    resetSession(key, agent) {
+      const before = state.get(key)
+      state.reset(key)
+      switchArbiter.reset(key)
+      disclosedTags.delete(key)
+      dynamicGrants.delete(key)
+      lastArbiterDecision = null
+      lastLintHit = ''
+      const restriction = refreshRestriction(key, agent)
+      return {
+        reset: true,
+        previousStage: before.stage,
+        stage: state.get(key).stage,
+        restriction,
+        message: '已复位到默认阶段，可以继续。',
+      }
+    },
 
-        if (groups.length === 0) {
-          dynamicGrants.delete(key)
-          const restriction = refreshRestriction(key, exec && exec.agent)
-          return { ok: true, released: true, restriction, message: '已放开全部工具组。' }
-        }
+    clearGrant(key, agent) {
+      dynamicGrants.delete(key)
+      const restriction = refreshRestriction(key, agent)
+      return { ok: true, released: true, restriction, message: '已放开全部工具组。' }
+    },
 
-        dynamicGrants.set(key, { groups: new Set(groups), remainingTurns: turns, createdAt: Date.now() })
-        const restriction = refreshRestriction(key, exec && exec.agent)
-        return {
-          ok: true,
-          groups,
-          turns,
-          restriction,
-          message: `已收窄到 ${groups.join('/')}，${turns} 轮后自动恢复。用完可 route_use({"groups":[]}) 立刻放开。`,
-        }
-      },
-    }),
-  )
+    setGrant(key, groups, turns, agent) {
+      dynamicGrants.set(key, { groups: new Set(groups), remainingTurns: turns, createdAt: Date.now() })
+      const restriction = refreshRestriction(key, agent)
+      return {
+        ok: true,
+        groups,
+        turns,
+        restriction,
+        message: `已收窄到 ${groups.join('/')}，${turns} 轮后自动恢复。用完可 route_use({"groups":[]}) 立刻放开。`,
+      }
+    },
 
-  // ------------------------------------------------------------------
-  // 4.6 工具 5：route_hint —— 运行时开关尾部提示（A/B 实验用）
-  // ------------------------------------------------------------------
-  ctx.effect(() =>
-    ctx.tools.register({
-      name: 'route_hint',
-      description:
-        '开/关当前会话的尾部路由提示（运行时生效，不用重载）。用于对比"有提示 vs 无提示"的表现与成本。不带参数则只查询当前状态。',
-      parameters: {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          enabled: { type: 'boolean', description: 'true = 注入提示，false = 不注入' },
-        },
-      },
-      output: RENDER,
-      async execute(args, exec) {
-        const key = keyOf(exec)
-        if (args && typeof args.enabled === 'boolean') {
-          if (args.enabled) hintOffSessions.delete(key)
-          else hintOffSessions.add(key)
-        }
-        return {
-          hintEnabled: hintRuntime && !hintOffSessions.has(key),
-          hintAvailable,
-          degraded: !guard.safe,
-          sample: hintFor(key),
-          scope: '本会话（不影响其它会话）',
-          note: '改动从下一次请求开始生效（本轮的提示已经发出去了）。',
-        }
-      },
-    }),
-  )
+    setHint(key, enabled) {
+      if (enabled) hintOffSessions.delete(key)
+      else hintOffSessions.add(key)
+    },
+
+    hintState(key) {
+      return {
+        hintEnabled: hintRuntime && !hintOffSessions.has(key),
+        hintAvailable,
+        degraded: !guard.safe,
+        sample: hintFor(key),
+        scope: '本会话（不影响其它会话）',
+        note: '改动从下一次请求开始生效（本轮的提示已经发出去了）。',
+      }
+    },
+  })
 
   // ------------------------------------------------------------------
   // 4.5 工具 4：route_init —— 生成"你自己领域的"阶段模板
@@ -1232,8 +1161,9 @@ export function apply(ctx, config = {}) {
             }
           }
           try {
-            const text = readFileSync(join(PRESETS_DIR, `${preset}.json`), 'utf8')
-            const parsed = JSON.parse(text)
+            const loaded = readPreset(preset)
+            if (!loaded.ok) throw new Error(loaded.error || `读不到 ${preset}`)
+            const parsed = loaded.data
             const checked = validateStagesConfig(parsed)
             if (!checked.ok) {
               return { ok: false, error: `示例自身校验失败：${checked.errors.join('；')}`, presets: available }

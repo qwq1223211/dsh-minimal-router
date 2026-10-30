@@ -3,6 +3,37 @@
 All notable changes to `dsh-minimal-router`.
 Format: [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/).
 
+## [1.10.0] — 2026-10-31
+
+工程化收口：把"能用的插件"变成"别人敢依赖的仓库"。
+
+### Added
+
+- **模糊测试**（`test/fuzz.test.mjs`，12 项 / 约 8400 个确定性随机输入）。
+  用 mulberry32 固定种子，随机喂控制字符、代理对、emoji、零宽字符、极端数值。
+  断言的不变量：解析器**绝不抛异常**、返回值永远是**无损 JSON**、
+  提示永远 ≤200 字、`tagOf` 永远返回非空小写标签、
+  **逃生门在任意随机阶段表下都不会被锁死**、成本估算永不出现 NaN/Infinity。
+- **仓库自检**（`scripts/lint.mjs`）。专治本项目被坑过两次的病：
+  BOM / U+FFFD / UTF-8→GBK 乱码串 / CRLF、`package.json` 的 main-exports 不一致、
+  `files` 声明缺失、库代码往 stdout 打 `console.log`、`index.js` 体积守卫。
+- **测试脚手架**（`test/harness.mjs`）：4 个测试文件共用一份，输出格式不变。
+- **文档**：`docs/ARCHITECTURE.md`（模块分层、会话状态表、一次请求经过的所有钩子、
+  四条不可破的约束）、`CONTRIBUTING.md`（提交前自查、架构约定、怎么加工具）、
+  `SECURITY.md`（攻击面只有三件事，以及我们明确不做的事）、issue 模板。
+- CI 增加 `fuzz` 和 `lint` 两步（仍是 3 平台 × 2 个 Node 版本）。
+
+### Changed
+
+- **`index.js` 1563 → 1493 行**：三个轻量工具的定义搬到 `lib/tools-dynamic.js`（依赖注入，
+  状态操作仍留在装配层）；内置示例的读取搬到 `lib/stages-config.js`（`listPresets` / `readPreset`）。
+  体积守卫因此重新上线。
+- `lib/probe.js` 的 `console.log` → `console.info`：库代码不该往 stdout 正式输出里插行。
+
+### 现状
+
+**241 项测试**（router 177 + guard 21 + probe 31 + fuzz 12），零运行时依赖。
+
 ## [1.9.0] — 2026-10-31
 
 The four items from a self-audit: one bug that could burn money with a single sentence, three

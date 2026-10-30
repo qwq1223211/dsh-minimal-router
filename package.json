@@ -1,6 +1,6 @@
 {
   "name": "@local/dsh-minimal-router",
-  "version": "1.9.0",
+  "version": "1.10.0",
   "private": true,
   "type": "module",
   "main": "./index.js",
@@ -30,6 +30,9 @@
     "README.zh.md",
     "README.en.md",
     "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "docs/*.md",
     "LICENSE",
     "custom_stages.sample.json",
     "examples/*.json"

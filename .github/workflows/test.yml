@@ -1,0 +1,40 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 20 = 当前 LTS，22 = 下一代 LTS。两个都过，说明没有踩版本边角。
+        node: [20, 22]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      # 这个包是零依赖的：不需要 npm install，直接跑。
+      - name: 环境
+        run: node --version
+
+      # 分三条跑，失败时能一眼看出是哪个模块挂了。
+      - name: router (105)
+        run: node test/router.test.mjs
+
+      - name: guard (21)
+        run: node test/guard.test.mjs
+
+      - name: probe (31)
+        run: node test/probe.test.mjs

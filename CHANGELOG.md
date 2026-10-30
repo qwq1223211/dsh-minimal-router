@@ -3,6 +3,47 @@
 All notable changes to `dsh-minimal-router`.
 Format: [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/).
 
+## [1.11.0] — 2026-10-31
+
+「只在别人机器上才炸」这一类问题的系统性收口。每一项都有测试或体检覆盖，并挂进了 CI。
+
+### Corrected（我之前说错了两处）
+
+1. **"`engines.dsh` 必须是精确值"是错的。** 从 `app.asar` 里挖出 `@deepseek-ai/dsh-app-boot`
+   的真实实现：它调用 `semver.satisfies(runtimeVersion, range, { includePrerelease: true })`——
+   **是范围判定**。
+2. **"带预发布下界的范围不匹配别的版本的预发布"也是我说错的。** 因为传了
+   `includePrerelease: true`，`>=0.2.1-rc.4` 同样匹配 `0.3.0-rc.1`。
+   这条我在 v1.4.0 的 CHANGELOG 里写反了，这里更正。
+
+### 新发现的一个真陷阱
+
+`range.trim() !== "" && semver.satisfies(...)` —— **空字符串会被判为"不满足"**，
+于是 `engines.dsh: ""` 会**直接拦住安装**。以前没人提过，现在体检会报错。
+
+### Added
+
+- **`scripts/audit-deps.mjs`**（7 项，失败退出码 1，已挂 CI）：
+  零外部依赖、`main`/`exports` 一致、`type: module`、
+  **`files` 是否覆盖"运行时真正会 import 的文件"（递归解析 import 图）**、
+  `inject` 不含 `systemPrompt`、`engines.dsh` 合法（含空串陷阱）、
+  写盘路径在包外、**没有任何写操作指向包内路径**（pnpm store 可能只读）。
+- **`test/install-elsewhere.test.mjs`**（8 项）：只按 `package.json` 的 `files`
+  复制一份到 `tmpdir/node_modules/.pnpm/<hash>/...`，从那里面 import 并 `apply()`。
+  断言：入口可加载、`STATE_DIR` 仍在用户目录、内置示例跟着包走、
+  6 个路由工具 + 熔断 + 探针全部注册、**apply 之后安装目录里不多出任何文件**、
+  缺 `systemPrompt` 时仍能加载。
+- CI 新增 `audit-deps` 与 `install-elsewhere` 两步（仍 3 平台 × 2 个 Node 版本）。
+- `CONTRIBUTING.md` 写明这些检查为什么存在、以及哪些是本机**验证不了**的。
+
+### 为什么这类 bug 值得单独立项
+
+它有一个共同的伪装：**在本机 link 安装时 100% 正常**。
+数据写在包里、少列一个 `files` 条目、硬依赖某个服务——这三件事在开发者机器上永远看不出问题，
+只有到别人机器上才炸，而且往往不报错、只是"没效果"。
+
+**249 项测试**（router 177 + guard 21 + probe 31 + fuzz 12 + install-elsewhere 8）。
+
 ## [1.10.0] — 2026-10-31
 
 工程化收口：把"能用的插件"变成"别人敢依赖的仓库"。

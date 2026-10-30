@@ -1,4 +1,4 @@
-# dsh-minimal-router · v1.10.0
+# dsh-minimal-router · v1.11.0
 
 [![Tests](https://github.com/qwq1223211/dsh-minimal-router/actions/workflows/test.yml/badge.svg)](https://github.com/qwq1223211/dsh-minimal-router/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
@@ -51,6 +51,23 @@ No registry, no package-name resolution, nothing but the clone. **If options 1 a
 
 Ask the agent for `route_status`. A JSON payload containing `stages`, `tagCounts`, and `modelGuard`
 means the plugin is installed and live.
+
+### How the version requirement is actually evaluated
+
+`package.json` declares `engines.dsh: ">=0.2.1-rc.4"`. The real check inside DSH is:
+
+```js
+range.trim() !== "" && semver.satisfies(runtimeVersion, range, { includePrerelease: true })
+```
+
+| Fact | Meaning |
+|---|---|
+| It is a **semver range**, not an exact version | Claims that the version must match exactly are wrong |
+| **`includePrerelease: true`** | Prerelease hosts match too; `-rc.N` needs no special handling |
+| **An empty string counts as unmet → install is refused** | Never set `engines.dsh` to `""` |
+
+If it blocks you, DSH reports `incompatible-version` with the unmet packages, and the plugin manager
+offers `set_version_exemption` for a specific runtime version (at your own risk).
 
 Runtime data (probe history, your `custom_stages.json`) lives in **`~/.dsh/minimal-router/`**, never inside
 the package — a real dependency install puts the package in a directory that gets replaced on upgrade.

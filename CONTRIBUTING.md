@@ -44,3 +44,31 @@ node scripts/lint.mjs         # 仓库自检（编码、结构、体积）
 
 放 `examples/<name>.json`，然后 `node scripts/lint.mjs` 会确认它被 `package.json` 的
 `files` 覆盖到；用 `route_init({"preset":"<name>"})` 就能测。
+
+## 依赖与入口：这一类 bug 有共同的伪装
+
+它们**在本机 link 安装时 100% 正常**，只在别人机器上炸，而且常常不报错、只是"没效果"。
+
+```bash
+node scripts/audit-deps.mjs           # 7 项体检，失败退出码 1
+node test/install-elsewhere.test.mjs  # 只按 files 复制一份，从"安装目录"里跑
+```
+
+| 检查项 | 它防止哪种事故 |
+|---|---|
+| 零外部依赖 / `main` 与 `exports` 一致 | 别人装上去 `cannot find module` |
+| **`files` 是否覆盖"运行时真正 import 的文件"**（递归解析 import 图） | 少列一个 `lib/*.js`，装上去就崩 |
+| `inject` 不含 `systemPrompt` | 缺这个服务的宿主让**整个插件**加载失败 |
+| `engines.dsh` 合法（含**空串陷阱**） | 空字符串会被 DSH 判为不满足 → 直接拦装 |
+| 写盘路径在包外 / 无写操作指向包内 | pnpm store 里包目录可能只读，写入必失败 |
+| `install-elsewhere` 全套 | 以上任何一条漏了，这个测试会红 |
+
+### 本机**验证不了**的三件事（别在 PR 里声称验证过）
+
+1. **DSH loader 如何解析 `cordis.patch.yml`** —— 逻辑在打包后的 `app.asar` 里。
+   我们能读源码（`_tools/inspect-asar.mjs`）但不能执行它。
+2. **`tools.restrict()` / `systemPrompt.context()` 的真实语义** —— 需要一个活着的宿主。
+   测试里的假宿主只保证"我们调用它的方式"是对的，不保证宿主行为。
+3. **pnpm 真装一次之后包落在哪、可不可写** —— 需要网络 + 一次真实 `dsh plugin add`。
+
+**这三件事只有"装到一台干净机器上跑一遍"才能确认。** 谁声称验证过，要求他给出步骤。

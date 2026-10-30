@@ -1,4 +1,4 @@
-# 极简路由（dsh-minimal-router）· v1.10.0 · 小白版说明
+# 极简路由（dsh-minimal-router）· v1.11.0 · 小白版说明
 
 [![Tests](https://github.com/qwq1223211/dsh-minimal-router/actions/workflows/test.yml/badge.svg)](https://github.com/qwq1223211/dsh-minimal-router/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
@@ -373,6 +373,23 @@ unsafeForce: true
 >
 > **配置写在哪个文件**：插件读的是**包内那份** `<包目录>/cordis.patch.yml`，不是 profile 的。
 > 改完必须**重载插件**（设置 → 插件 → 关掉再打开）才生效。
+
+### 版本要求是怎么判的（从 DSH 源码里挖出来的）
+
+`package.json` 里写的是 `engines.dsh: ">=0.2.1-rc.4"`。DSH 的真实逻辑是：
+
+```js
+range.trim() !== "" && semver.satisfies(runtimeVersion, range, { includePrerelease: true })
+```
+
+| 事实 | 说明 |
+|---|---|
+| 是 **semver 范围**，不是精确值 | 网上说"必须版本号一模一样"的说法是错的 |
+| 带 **`includePrerelease: true`** | 预发布版本也会匹配，不用纠结 `-rc.N` |
+| **空字符串 = 不满足 → 直接拦装** | 千万别把 `engines.dsh` 改成 `""` |
+
+被拦时 DSH 会给出 `incompatible-version` 并列出未满足的包；插件管理器另有
+`set_version_exemption` 可按精确运行时版本豁免（自担风险）。
 
 **怎么知道自己的模型支不支持？** 换上去跑两步，然后用 `dsh-cache-probe` 看 `hitRate`：
 - 一直 99%+ → 支持，可以加进 `trustedModels`

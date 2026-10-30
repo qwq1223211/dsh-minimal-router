@@ -1,13 +1,7 @@
 # dsh-minimal-router · v1.0.0
 
-[![Tests](https://github.com/qwq1223211/dsh-minimal-router/actions/workflows/test.yml/badge.svg)](https://github.com/qwq1223211/dsh-minimal-router/actions/workflows/test.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
-[![DeepSeek Harness](https://img.shields.io/badge/DSH-plugin-4F7CFF)](https://github.com/deepseek-ai/deepseek-harness)
-[![Tools](https://img.shields.io/badge/tools%20per%20request-165%20%E2%86%92%2066-orange)](#numbers-same-machine-same-model-measured-with-dsh-cache-probe)
-
 > **Give the model only the tools it needs right now.** Fixed prefix, variable tail.
-> Measured in a fresh session: **165 tools → 66 tools**, **131,694 → 43,238 bytes** (−67.2%),
-> **promptTokens 47,885 → 25,688** (−46.4%) at **99.16%** cache hit.
+> Measured: **165 tools → 69 tools**, **131,694 → 48,837 bytes** of tool declarations per request.
 
 A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) host plugin. No build step, no dependencies.
 
@@ -69,6 +63,8 @@ Then **Settings → Plugins → disable, then enable** the row (a linked install
 
 Tags are derived from tool names (`unity_object_create` → `unity`, `mcp__meshy__x` → `meshy`). **Groups no stage claims are always allowed**, so a newly installed plugin is never blocked for being unclassified.
 
+> This table looks Unity/Meshy-heavy because that is what the author works on — not because the plugin only supports game development. Swapping it for Python, data analysis, writing, or video editing takes about a minute; see the next section.
+
 ## Bring your own domain
 
 ```powershell
@@ -82,6 +78,16 @@ It writes `custom_stages.sample.json` containing:
 - `_readme` — the 5 steps
 
 Rename to `custom_stages.json`, edit, restart the plugin. Merge order is **built-in → `custom_stages.json` → `cordis.patch.yml`**; a malformed file is ignored with a warning, never fatal.
+
+### Why not fully automatic?
+
+Because **"never block the wrong tool" outranks "save the most tokens"**.
+
+For any tool group that no stage claims, the only safe default is to **allow it**. Guessing what your brand-new tool does would sometimes guess wrong — and a wrong guess blocks you in the middle of a task, which is far worse than not saving a few thousand tokens.
+
+`route_init` is the compromise: one scan of *your* tools, one template, about a minute of editing, then routing is automatic forever. It lists every unclaimed group with its tool count, so the decision you are confirming is a small, concrete one.
+
+> One line: it is not lazy. Blind guessing is just more expensive than one minute of confirmation.
 
 ## Hard rules (not configurable)
 

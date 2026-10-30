@@ -63,6 +63,8 @@ Then **Settings → Plugins → disable, then enable** the row (a linked install
 
 Tags are derived from tool names (`unity_object_create` → `unity`, `mcp__meshy__x` → `meshy`). **Groups no stage claims are always allowed**, so a newly installed plugin is never blocked for being unclassified.
 
+> This table looks Unity/Meshy-heavy because that is what the author works on — not because the plugin only supports game development. Swapping it for Python, data analysis, writing, or video editing takes about a minute; see the next section.
+
 ## Bring your own domain
 
 ```powershell
@@ -76,6 +78,16 @@ It writes `custom_stages.sample.json` containing:
 - `_readme` — the 5 steps
 
 Rename to `custom_stages.json`, edit, restart the plugin. Merge order is **built-in → `custom_stages.json` → `cordis.patch.yml`**; a malformed file is ignored with a warning, never fatal.
+
+### Why not fully automatic?
+
+Because **"never block the wrong tool" outranks "save the most tokens"**.
+
+For any tool group that no stage claims, the only safe default is to **allow it**. Guessing what your brand-new tool does would sometimes guess wrong — and a wrong guess blocks you in the middle of a task, which is far worse than not saving a few thousand tokens.
+
+`route_init` is the compromise: one scan of *your* tools, one template, about a minute of editing, then routing is automatic forever. It lists every unclaimed group with its tool count, so the decision you are confirming is a small, concrete one.
+
+> One line: it is not lazy. Blind guessing is just more expensive than one minute of confirmation.
 
 ## Hard rules (not configurable)
 

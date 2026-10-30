@@ -62,4 +62,4 @@ First public release. Built and measured on a real DSH profile with 40+ plugins.
 
 - Tool trimming needs the agent-scoped context; a plain `ctx.tools.restrict()` call is refused by DSH by design.
 - A stage switch still costs one prefix rebuild; the safety gate only stops you from doing it in a huge session.
-- Unity / Meshy stage definitions ship as defaults even though most users will not need them — edit `custom_stages.json`.
+- The built-in stage table happens to know Unity and Meshy because that is the author's own setup. Different domain? `route_init` scans *your* installed tools and hands you a ready-to-edit template — about a minute, and then routing is automatic. (The plugin deliberately never guesses: an unclaimed tool group is always allowed, because a wrong guess would block you mid-task.)

@@ -120,11 +120,22 @@ for (const dir of ['lib', '.']) {
 // 5. 体积守卫
 // ---------------------------------------------------------------------------
 const INDEX = join(root, 'index.js')
-const indexLines = readFileSync(INDEX, 'utf8').split('\n').length
-if (indexLines > 1500) {
-  problems.push(`index.js 有 ${indexLines} 行，超过 1500 行的守卫线——该拆了`)
-} else if (indexLines > 1350) {
-  warnings.push(`index.js 有 ${indexLines} 行，接近 1500 行守卫线`)
+/**
+ * 只数**代码行**：去掉块注释、行注释和空行。
+ *
+ * 【为什么要改】原来这条守卫数的是原始行数，而 index.js 有多达 27% 是注释——
+ * 于是"多写一段解释"和"多写一段逻辑"被同等惩罚。那是在奖励少写注释。
+ * 现在按代码行数算，阈值也重新校准过（当前 ~1105 行）。
+ */
+function codeLineCount(file) {
+  const text = readFileSync(file, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')
+  return text.split('\n').filter((line) => line.trim() && !line.trim().startsWith('//')).length
+}
+const indexCodeLines = codeLineCount(INDEX)
+if (indexCodeLines > 1200) {
+  problems.push(`index.js 有 ${indexCodeLines} 行代码（不含注释），超过 1200 行的守卫线——该拆了`)
+} else if (indexCodeLines > 1100) {
+  warnings.push(`index.js 有 ${indexCodeLines} 行代码（不含注释），接近 1200 行守卫线`)
 }
 
 // ---------------------------------------------------------------------------

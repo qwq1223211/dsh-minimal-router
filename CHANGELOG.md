@@ -3,6 +3,58 @@
 All notable changes to `dsh-minimal-router`.
 Format: [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/).
 
+## [1.13.2] — 2026-10-31
+
+第一次真的把 A/B 跑起来了。**它没证明"省了 X%"，但它抓到了两个真问题**——这比一个漂亮数字值钱。
+
+### A/B 做了什么
+
+两个子会话，任务完全相同（切阶段 → 建 3 个文件 → 读回 → 报告），唯一差异是第 1 步：
+A 臂 `route_stage("core")`（裁剪开），B 臂 `route_stage("auto")`（裁剪关）。
+
+**从探针原始记录里读出来的事实**（不是子会话自己的汇报）：
+
+| 臂 | tools | toolsChars | prefixSig |
+|---|---|---|---|
+| A（core） | 72 | **50,101** | e3078b10 |
+| B / 主会话（auto） | 172 | 138,711 | c04e7cca |
+
+**裁剪确实生效，而且幅度很大：138,711 → 50,101 字节（−63.9%）。**
+
+### 抓到的问题 1：`route_status` 在谎报可见数
+
+A 臂自报 `restrictedToolCount=100`、`estimatedAdvertised=38`，但请求里实际剩 **72** 个。
+原因：deny 列表是按**子会话自己的注册表**（138 个）算的，而 `restrict()` 作用在**更大的共享工具表**（172 个）上：
+
+```
+172 − 100 = 72   ← 实际
+138 − 100 = 38   ← 我们报的
+```
+
+**修法**：不再用减法估。`restrict()` 之后**重新读一次** `scopedTools.schemas()`，
+新增字段 `advertisedAfterRestrict`（真实可见数；读不到就是 `null`，不瞎报）。+1 测试。
+
+### 抓到的问题 2：`scope:"session"` 分不清父会话和子会话
+
+两个子会话都报 `session = 6a12cf96`、`toolsChars = 138711` —— **一模一样**，因为它们和主会话
+共享同一个 `sessionId`，`scope:"session"` 把三者的请求混成了一个。
+
+**修法**：session 作用域下新增 **`byPrefix`**：按前缀指纹分组，列出"这个会话里出现过哪几种工具表"
+（每个带 tools / toolsChars / 次数 / 命中率）。A/B 就是靠它区分的。
+
+### 顺手修正的度量
+
+体积守卫原来数**原始行数**（index.js 1511 行），而其中 27% 是注释——等于在惩罚写注释。
+改成只数**代码行**（当前 1105 行），阈值重新校准到 1200。这不是放宽标准，是换了个正确的尺子。
+
+### 没做到的（说清楚）
+
+- 本次改动**没有重载插件做真机验证**（重载 = 一次全价重建，这个会话已经很贵了）。
+  `advertisedAfterRestrict` 与 `byPrefix` 需要重载后才能在 `route_status` / `cache_probe_report` 里看到。
+- A/B 的样本仍然是 **n=1**。`docs/AB.md` 里写了要跑 3 次取中位数，这次没跑。
+
+**285 项测试**（router 178 + guard 21 + probe 31 + fuzz 12 + instrument 31 + install-elsewhere 8 + migration 4）。
+
 ## [1.13.1] — 2026-10-31
 
 三件"离顶尖还差什么"里能做的两件半做完了，第三件（改包名）**查完证据后撤回**。

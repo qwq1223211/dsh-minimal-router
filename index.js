@@ -32,7 +32,7 @@ import {
   computeDenyList,
 } from './lib/classify.js'
 import { createStageState, textOfMessage, detectStage, isExplicitSwitch, createSwitchArbiter } from './lib/stage.js'
-import { estimateSwitchEconomy, decideByEconomy, describeEconomy } from './lib/cost.js'
+import { estimateSwitchEconomy, decideByEconomy, describeEconomy, measureDeniedBytes } from './lib/cost.js'
 import { registerDynamicTools } from './lib/tools-dynamic.js'
 import { renderHint, HINT_LIMIT } from './lib/prompt.js'
 import { scanCode, formatFindings } from './lib/lint.js'
@@ -528,28 +528,15 @@ export function apply(ctx, config = {}) {
   // 最近一次仲裁结果（route_status 里展示）
   let lastArbiterDecision = null
 
-  /** 切到某个阶段会摘掉多少字节的工具声明 */
+  /** 切到某个阶段会摘掉多少字节的工具声明（实现在 lib/cost.js） */
   function deniedBytesForStage(stage) {
-    try {
-      const schemas = typeof ctx.tools.schemas === 'function' ? ctx.tools.schemas() : []
-      const names = schemas.map((t) => (t && typeof t.name === 'string' ? t.name : '')).filter(Boolean)
-      const deny = new Set(
-        computeDenyList({ toolNames: names, stage, stages: cfg.stages, claimed, coreTools: cfg.coreTools }),
-      )
-      if (deny.size === 0) return 0
-      let bytes = 0
-      for (const tool of schemas) {
-        if (!tool || !deny.has(tool.name)) continue
-        bytes += JSON.stringify({
-          name: tool.name,
-          description: tool.description,
-          parameters: tool.parameters,
-        }).length
-      }
-      return bytes
-    } catch {
-      return 0
-    }
+    const schemas = typeof ctx.tools.schemas === 'function' ? ctx.tools.schemas() : []
+    return measureDeniedBytes(schemas, stage, {
+      stages: cfg.stages,
+      claimed,
+      coreTools: cfg.coreTools,
+      computeDenyList,
+    })
   }
 
   /** 估算"现在切到这个阶段"的成本 / 收益 / 回本轮数 */
@@ -701,8 +688,36 @@ export function apply(ctx, config = {}) {
         return { applied: false, reason: 'nothing-to-deny', stage, visible: names.length }
       }
       const dispose = scopedTools.restrict({ deny })
-      restrictions.set(key, { dispose, stage, signature, denyCount: deny.length, visible: names.length })
-      return { applied: true, reason: 'ok', stage, signature, deny: deny.length, visible: names.length }
+
+      // 【A/B 实测发现】deny 列表是按**这个会话的注册表**算的，但 restrict() 实际作用在
+      // 可能更大的共享工具表上 —— 实测：子会话注册表 138 个、算出 deny=100，
+      // 结果请求里剩 172-100=72 个，而不是 138-100=38 个。
+      // 所以"剩多少"不能靠减法估，必须在 restrict 之后**重新读一次真实的可见列表**。
+      let visibleAfter = null
+      try {
+        if (typeof scopedTools.schemas === 'function') visibleAfter = scopedTools.schemas().length
+      } catch {
+        visibleAfter = null
+      }
+
+      restrictions.set(key, {
+        dispose,
+        stage,
+        signature,
+        denyCount: deny.length,
+        visible: names.length,
+        visibleAfter,
+      })
+      return {
+        applied: true,
+        reason: 'ok',
+        stage,
+        signature,
+        deny: deny.length,
+        visible: names.length,
+        // 真实可见数（restrict 之后重新读的）；拿不到就是 null，不瞎报
+        visibleAfter,
+      }
     } catch (error) {
       return { applied: false, reason: `error:${error && error.message ? error.message : String(error)}`, stage }
     }
@@ -982,8 +997,11 @@ export function apply(ctx, config = {}) {
           registeredToolCount: catalog.total,
           // 本阶段被物理摘掉多少个
           restrictedToolCount: denyCount,
-          // 估算真正发出去多少个（注册数 - 摘掉的数）。以 cache_probe_report 为准
+          // 【别再信减法】注册数 − 摘掉的数 只是估算：deny 是按本会话注册表算的，
+          // 而 restrict() 可能作用在更大的共享工具表上（实测差过 38 vs 72）。
           estimatedAdvertised: Math.max(0, catalog.total - denyCount),
+          // 真实可见数：restrict 之后重新读一次 scoped schemas 得到的长度。null = 没测到，不瞎报
+          advertisedAfterRestrict: (restrictions.get(key) || {}).visibleAfter ?? null,
           tagCounts: catalog.tags,
           // 还没被任何阶段管的工具组（新装的插件会出现在这里；它们目前永远放行）
           unclaimedTags: findUnclaimed({ tagCounts: catalog.tags, claimed }),

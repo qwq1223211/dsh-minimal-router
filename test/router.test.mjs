@@ -2282,6 +2282,20 @@ await test('P2 基线：各省钱阶段的字节削减不得低于记录值（�
 })
 
 // ============================================================================
+// 10.22 可见数必须是真的（A/B 实测抓到的谎报）
+// ============================================================================
+await test('可见数：restrict 之后报的是真实可见数，不是减法估的', async () => {
+  const rt = makeFakeCtx()
+  apply(rt.ctx, { enforceByRestrict: true })
+  const agent = rt.makeAgent('vis-1')
+  await rt.tools.get('route_stage').execute({ stage: 'core' }, { agent })
+  const status = await rt.tools.get('route_status').execute({}, { agent })
+  const actual = agent.ctx.tools.schemas().length
+  assertEqual(status.advertisedAfterRestrict, actual, '必须等于 restrict 之后重新读到的长度')
+  assertEqual(status.advertisedAfterRestrict, 6, 'core 阶段在假环境里应为 6 个')
+})
+
+// ============================================================================
 // 11. 配置
 // ============================================================================
 await test('配置：脏数据自动回退，不会把插件搞挂', () => {

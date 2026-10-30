@@ -3,6 +3,36 @@
 All notable changes to `dsh-minimal-router`.
 Format: [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/).
 
+## [1.5.0] — 2026-10-30
+
+Two things from a review of the ecosystem's failure modes: one real lockout bug, one cache-stability lever.
+
+### Fixed
+
+- **`cache_probe_report` / `cache_probe_clear` were missing from `ALWAYS_ALLOW`.** With `strict: true` (added
+  in 1.3.0) the deny rule also covers unclaimed tags — and the probe tools are tagged `cache`, which no stage
+  claims. So enabling strict mode **hid the diagnostic tools themselves**, and the user could no longer see
+  any number explaining why nothing was being saved. That is precisely the "control plane hides itself, 221
+  tools locked, no way out" anti-pattern reported for another router. The escape hatch is now checked before
+  every rule, probe tools included.
+
+### Added
+
+- **`accumulateDisclosure`** (default `false`) — once a tool group has been visible in this session, it stays
+  visible; the tool list only grows, so consecutive switches differ less and the prefix cache is more stable.
+  Trade-off: trimming weakens as the session goes on, which is why it is opt-in. `route_reset` clears the
+  accumulated set so you can return to strict trimming.
+- The long-session warning now also suggests running `/trim` (if `dsh-command-context-trim` is installed)
+  before switching, alongside "start a new session".
+- 5 new tests (router 140 → 145; **197 total**), including one that asserts the probe tools survive strict mode.
+
+### Notes on the review this came from
+
+Several of its items were already shipped and are confirmed here rather than re-implemented: tail injection
+already goes through `systemPrompt.context()` (not the system prompt — `prefixSig` stays constant across
+stage switches), the soft pre-warning at 80% of the gate landed in 1.4.0, bundled domain presets landed in
+1.4.0, and the "unknown is visible" default has been the design since 1.0.0.
+
 ## [1.4.0] — 2026-10-30
 
 Three onboarding and long-session improvements, plus a correction to a claim that was circulating about

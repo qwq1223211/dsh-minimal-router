@@ -222,6 +222,10 @@ const CONFIG_DEFAULTS = {
   hintMaxChars: 200,
   // 【修改这里】上下文达到阈值的多少比例时，提前在控制台预警（0 = 关闭）
   contextGuardWarnRatio: 0.8,
+  // 【修改这里】★ 累积披露：某一组工具在本会话里一旦露过面，就保持可见（不再收回）
+  //   true  = 工具表只会变大不会变小 → 切换的差异更小、缓存更稳，但瘦身效果打折
+  //   false = 严格按当前阶段裁剪（默认）
+  accumulateDisclosure: false,
   // 【修改这里】★ 迟滞：随口提到的关键词要连续几次指向同一阶段才真的切（1 = 不迟滞）
   //   默认 2，用来挡住"在 Unity 代码任务里顺嘴提了一句界面"这种误切换
   switchConfirmations: 2,
@@ -322,6 +326,7 @@ export function normalizeConfig(raw = {}) {
         ? Math.trunc(Number(src.switchCooldownMs))
         : CONFIG_DEFAULTS.switchCooldownMs,
     costGateEnabled: src.costGateEnabled !== false,
+    accumulateDisclosure: src.accumulateDisclosure === true,
     hintMaxChars:
       Number.isFinite(Number(src.hintMaxChars)) && Number(src.hintMaxChars) >= 40
         ? Math.min(1000, Math.trunc(Number(src.hintMaxChars)))
@@ -473,6 +478,8 @@ export function apply(ctx, config = {}) {
   // ------------------------------------------------------------------
   const agentRefs = new Map() // key → agent（存引用，用于拿 agent.ctx）
   const restrictions = new Map() // key → { dispose, stage, denyCount, visible }
+  // 【累积披露】key → 本会话里"已经露过面"的标签集合
+  const disclosedTags = new Map()
   // 每个会话最近一次请求的真实上下文长度（token），安全闸门用
   const promptTokensBySession = new Map()
   // 已经被闸门拦过的会话（用于"只警告一次"）
@@ -589,7 +596,24 @@ export function apply(ctx, config = {}) {
               .map((tool) => (tool && typeof tool.name === 'string' ? tool.name : ''))
               .filter(Boolean)
           : []
-      const deny = computeDenyList({ toolNames: names, stage, stages: cfg.stages, claimed, coreTools: cfg.coreTools })
+      let deny = computeDenyList({ toolNames: names, stage, stages: cfg.stages, claimed, coreTools: cfg.coreTools })
+
+      // 【累积披露】本会话里已经露过面的组，不再收回。
+      // 好处：工具表只会变大不会变小 → 每次切换的差异更小，前缀缓存更稳。
+      // 代价：瘦身效果随会话变长而衰减（所以默认关闭，由用户显式打开）。
+      if (cfg.accumulateDisclosure) {
+        const seen = disclosedTags.get(key) || new Set()
+        if (deny.length > 0) {
+          const deniedSet = new Set(deny)
+          deny = deny.filter((name) => !seen.has(tagOf(name, cfg.coreTools)))
+          // 这一步"白露了"的工具，其标签同样算已披露
+          for (const name of names) if (!deniedSet.has(name)) seen.add(tagOf(name, cfg.coreTools))
+        } else {
+          for (const name of names) seen.add(tagOf(name, cfg.coreTools))
+        }
+        disclosedTags.set(key, seen)
+      }
+
       if (deny.length === 0) {
         return { applied: false, reason: 'nothing-to-deny', stage, visible: names.length }
       }
@@ -958,6 +982,7 @@ export function apply(ctx, config = {}) {
         const before = state.get(key)
         state.reset(key)
         switchArbiter.reset(key)
+        disclosedTags.delete(key)
         lastArbiterDecision = null
         lastLintHit = ''
         const restriction = refreshRestriction(key, exec && exec.agent)
@@ -1274,7 +1299,8 @@ export function apply(ctx, config = {}) {
             console.warn(
               `[minimal-router] 上下文已达 ${total} token（阈值的 ${Math.round((total / threshold) * 100)}%）。\n` +
                 `  再涨下去，"切阶段"会被安全闸门拒绝——因为那会触发一次全量前缀重建。\n` +
-                `  建议现在开一个新会话继续，把这块上下文留在原地。`,
+                `  建议现在开一个新会话继续，把这块上下文留在原地；\n` +
+                `  或者先跑 /trim（若装了 dsh-command-context-trim）把最旧的历史削掉，再切阶段。`,
             )
           }
         }

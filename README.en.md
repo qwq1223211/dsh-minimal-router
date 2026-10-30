@@ -234,6 +234,22 @@ price) and computes:
 An automatic switch is refused when payback exceeds `switchPaybackTurns` (default **3**).
 Explicit commands are exempt — if you asked for it, the accounting does not get to say no.
 
+### Want a tool list that only grows?
+
+```yaml
+accumulateDisclosure: true
+```
+
+Once a group has been visible in this session it is never taken away, so consecutive switches differ less and
+the prefix cache is more stable — at the cost of weaker trimming as a session ages. Off by default;
+`route_reset` clears the accumulated set.
+
+### Scope: before, not after
+
+This plugin only **trims before the fact**; it does not compress history. Use `/trim`
+(`dsh-command-context-trim`) or a compaction plugin for that. Cheapest order in a long session:
+`/trim` first, then switch stage — the full-price rebuild then has a smaller base.
+
 ## Configuration
 
 ```yaml

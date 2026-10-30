@@ -1718,6 +1718,62 @@ await test('体验：写错的示例名会给出可用列表，而不是报错',
 })
 
 // ============================================================================
+// 10.12 安全回退 + 累积披露（别人踩过的"控制面被藏死"反模式）
+// ============================================================================
+await test('安全：strict 模式下诊断工具也不能被藏死（否则再也看不到数字）', () => {
+  const stages = { locked: { title: '严格', allow: [], strict: true } }
+  const claimed = claimedTags(stages)
+  for (const tool of ['cache_probe_report', 'cache_probe_clear', 'route_status', 'route_reset', 'guard_reset']) {
+    const v = decideOutOfStage({ toolName: tool, stage: 'locked', stages, claimed })
+    assertEqual(v.allow, true, `${tool} 在严格模式里也必须能调`)
+  }
+})
+
+await test('安全：strict 下普通工具确实会被拦（确认不是全都放行）', () => {
+  const stages = { locked: { title: '严格', allow: [], strict: true } }
+  const claimed = claimedTags(stages)
+  const v = decideOutOfStage({ toolName: 'unity_object_create', stage: 'locked', stages, claimed })
+  assertEqual(v.allow, false)
+})
+
+await test('累积披露：关掉时按阶段严格裁剪（默认）', async () => {
+  const rt = makeFakeCtx()
+  apply(rt.ctx, { enforceByRestrict: true })
+  const agent = rt.makeAgent('acc-0')
+  // unity-code 阶段：unity 工具是**可见**的
+  await rt.tools.get('route_stage').execute({ stage: 'unity-code' }, { agent })
+  // 切到 core：unity 应该被收回
+  await rt.tools.get('route_stage').execute({ stage: 'core' }, { agent })
+  const lastDeny = rt.restricts[rt.restricts.length - 1].deny
+  assert(lastDeny.includes('unity_object_create'), '默认不累积：unity 露过面也会被收回')
+})
+
+await test('累积披露：打开后，露过面的组不再收回（工具表只增不减）', async () => {
+  const rt = makeFakeCtx()
+  apply(rt.ctx, { enforceByRestrict: true, accumulateDisclosure: true })
+  const agent = rt.makeAgent('acc-1')
+  // unity-code 阶段：unity 工具可见 → 记为"已披露"
+  await rt.tools.get('route_stage').execute({ stage: 'unity-code' }, { agent })
+  // 切到 core：unity 已经露过面，不该被收回
+  await rt.tools.get('route_stage').execute({ stage: 'core' }, { agent })
+  const lastDeny = rt.restricts[rt.restricts.length - 1].deny
+  assertEqual(lastDeny.includes('unity_object_create'), false, 'unity 已经露过面，不该再被收回')
+  // 但没露过面的组照样砍（比如 meshy）
+  assert(lastDeny.includes('meshy_image_to_3d'), '没露面过的组仍然要被砍，否则就不叫瘦身了')
+})
+
+await test('累积披露：route_reset 会清空累积状态（回到严格裁剪）', async () => {
+  const rt = makeFakeCtx()
+  apply(rt.ctx, { enforceByRestrict: true, accumulateDisclosure: true })
+  const agent = rt.makeAgent('acc-2')
+  await rt.tools.get('route_stage').execute({ stage: 'unity-code' }, { agent })
+  await rt.tools.get('route_reset').execute({}, { agent })
+  await rt.tools.get('route_stage').execute({ stage: 'core' }, { agent })
+  const lastDeny = rt.restricts[rt.restricts.length - 1].deny
+  assert(lastDeny.includes('unity_object_create'), '复位后应该重新严格裁剪')
+})
+
+// ============================================================================
 // 11. 配置
 // ============================================================================
 await test('配置：脏数据自动回退，不会把插件搞挂', () => {

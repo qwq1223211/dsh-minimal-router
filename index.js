@@ -689,24 +689,17 @@ export function apply(ctx, config = {}) {
       }
       const dispose = scopedTools.restrict({ deny })
 
-      // 【A/B 实测发现】deny 列表是按**这个会话的注册表**算的，但 restrict() 实际作用在
-      // 可能更大的共享工具表上 —— 实测：子会话注册表 138 个、算出 deny=100，
-      // 结果请求里剩 172-100=72 个，而不是 138-100=38 个。
-      // 所以"剩多少"不能靠减法估，必须在 restrict 之后**重新读一次真实的可见列表**。
-      let visibleAfter = null
-      try {
-        if (typeof scopedTools.schemas === 'function') visibleAfter = scopedTools.schemas().length
-      } catch {
-        visibleAfter = null
-      }
-
+      // 【A/B 三轮实测后的更正】deny 列表按本会话注册表算，restrict() 却作用在更大的共享表上：
+      // 注册表 138、deny=100，请求里实际剩 172-100=72。
+      // 我试过"restrict 之后重新读 scopedTools.schemas()"来自证，结果仍然是 138——
+      // **那个接口不反映限制**。所以这里不再对外报"剩多少"，
+      // 唯一权威的数字是 cache_probe_report 里的 tools / toolsChars。
       restrictions.set(key, {
         dispose,
         stage,
         signature,
         denyCount: deny.length,
         visible: names.length,
-        visibleAfter,
       })
       return {
         applied: true,
@@ -715,8 +708,8 @@ export function apply(ctx, config = {}) {
         signature,
         deny: deny.length,
         visible: names.length,
-        // 真实可见数（restrict 之后重新读的）；拿不到就是 null，不瞎报
-        visibleAfter,
+        // 【不报"还剩多少"】三轮 A/B 证明：减法估（38）和 scoped schemas（138）都不等于
+        // 真实发出去的数（72）。唯一权威的是 cache_probe_report 的 tools/toolsChars。
       }
     } catch (error) {
       return { applied: false, reason: `error:${error && error.message ? error.message : String(error)}`, stage }
@@ -997,11 +990,12 @@ export function apply(ctx, config = {}) {
           registeredToolCount: catalog.total,
           // 本阶段被物理摘掉多少个
           restrictedToolCount: denyCount,
-          // 【别再信减法】注册数 − 摘掉的数 只是估算：deny 是按本会话注册表算的，
-          // 而 restrict() 可能作用在更大的共享工具表上（实测差过 38 vs 72）。
+          // 【别再信减法，也别信 scoped schemas】注册数 − 摘掉的数只是估算：
+          // deny 按本会话注册表算，restrict() 却作用在更大的共享表上（实测 38 vs 72）。
+          // 而 restrict 之后重新读 scopedTools.schemas() 仍然是 138 —— 那个接口不反映限制。
+          // 所以"到底发出去多少个"只有 cache_probe_report 的 tools/toolsChars 是权威的。
           estimatedAdvertised: Math.max(0, catalog.total - denyCount),
-          // 真实可见数：restrict 之后重新读一次 scoped schemas 得到的长度。null = 没测到，不瞎报
-          advertisedAfterRestrict: (restrictions.get(key) || {}).visibleAfter ?? null,
+          // [已删除] advertisedAfterRestrict：三轮 A/B 实测证明它报 138 而实际是 72，会误导人。
           tagCounts: catalog.tags,
           // 还没被任何阶段管的工具组（新装的插件会出现在这里；它们目前永远放行）
           unclaimedTags: findUnclaimed({ tagCounts: catalog.tags, claimed }),

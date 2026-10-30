@@ -2282,17 +2282,20 @@ await test('P2 基线：各省钱阶段的字节削减不得低于记录值（�
 })
 
 // ============================================================================
-// 10.22 可见数必须是真的（A/B 实测抓到的谎报）
+// 10.22 不许再引入"假可见数"（三轮 A/B 抓到的第二种谎报）
 // ============================================================================
-await test('可见数：restrict 之后报的是真实可见数，不是减法估的', async () => {
+await test('可见数：不再对外报"还剩多少"，只留估算 + 指向探针', async () => {
   const rt = makeFakeCtx()
   apply(rt.ctx, { enforceByRestrict: true })
   const agent = rt.makeAgent('vis-1')
   await rt.tools.get('route_stage').execute({ stage: 'core' }, { agent })
   const status = await rt.tools.get('route_status').execute({}, { agent })
-  const actual = agent.ctx.tools.schemas().length
-  assertEqual(status.advertisedAfterRestrict, actual, '必须等于 restrict 之后重新读到的长度')
-  assertEqual(status.advertisedAfterRestrict, 6, 'core 阶段在假环境里应为 6 个')
+
+  // 三轮 A/B 实测：减法估报 38、scoped schemas 报 138、请求里实际是 72。
+  // 两个"看起来更准"的数都是错的，所以它们都不该再出现。
+  assertEqual(status.advertisedAfterRestrict, undefined, 'scoped schemas 不反映限制，不许再报')
+  assertEqual(typeof status.estimatedAdvertised, 'number', '保留估算值，但字段名必须带 estimate')
+  assertEqual(status.restrictedToolCount > 0, true, '摘掉了多少是可以报的（这是我们自己的决定）')
 })
 
 // ============================================================================

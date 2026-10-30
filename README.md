@@ -1,7 +1,13 @@
 # dsh-minimal-router · v1.0.0
 
+[![Tests](https://img.shields.io/badge/tests-157%20passing-brightgreen)](./test)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
+[![DeepSeek Harness](https://img.shields.io/badge/DSH-plugin-4F7CFF)](https://github.com/deepseek-ai/deepseek-harness)
+[![Tools](https://img.shields.io/badge/tools%20per%20request-165%20%E2%86%92%2066-orange)](#numbers-same-machine-same-model-measured-with-dsh-cache-probe)
+
 > **Give the model only the tools it needs right now.** Fixed prefix, variable tail.
-> Measured: **165 tools → 69 tools**, **131,694 → 48,837 bytes** of tool declarations per request.
+> Measured in a fresh session: **165 tools → 66 tools**, **131,694 → 43,238 bytes** (−67.2%),
+> **promptTokens 47,885 → 25,688** (−46.4%) at **99.16%** cache hit.
 
 A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) host plugin. No build step, no dependencies.
 

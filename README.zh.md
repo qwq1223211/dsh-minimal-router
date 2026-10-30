@@ -1,5 +1,10 @@
 # 极简路由（dsh-minimal-router）· 小白版说明
 
+[![Tests](https://img.shields.io/badge/tests-157%20passing-brightgreen)](./test)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
+[![DeepSeek Harness](https://img.shields.io/badge/DSH-plugin-4F7CFF)](https://github.com/deepseek-ai/deepseek-harness)
+[![Tools](https://img.shields.io/badge/tools%20per%20request-165%20%E2%86%92%2066-orange)
+
 > 一句话：**让 AI 一次只看见它当前需要的工具，看不见的就不花钱。**
 
 ---

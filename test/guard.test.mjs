@@ -197,9 +197,9 @@ await test('熔断后第 4 次工具调用被拒绝，且提示里带错误原�
   await failTimes(rt, 3)
   const blocked = await rt.callTool('edit', 'error')
   assertEqual(blocked.blocked, true, '熔断后必须拦下来')
-  assert(blocked.reason.includes('已熔断'), '提示里要有"已熔断"字样')
+  assert(blocked.reason.includes('circuit breaker tripped'), '提示里要有"已熔断"字样')
   assert(blocked.reason.includes('BOOM: edit failed'), '提示里要带最近一次错误原文')
-  assert(blocked.reason.includes('汇报给用户'), '提示里要有"汇报给用户"的硬指令')
+  assert(blocked.reason.includes('Report the error above to the user'), '提示里要有"汇报给用户"的硬指令')
 })
 
 await test('熔断后连成功调用也一起拦住（彻底停下来）', async () => {
@@ -215,7 +215,7 @@ await test('被自己拦下来的那次不算"新错误"（真实环境发现的
   // 真实 DSH 里，被 deny 的调用也会走一次 tools/result（isError=true，内容就是熔断提示）
   rt.emit('tools/result', { name: 'read', agent: rt.agent }, {
     isError: true,
-    error: { message: '【dsh-minimal-guard 已熔断】\n连续 3 次工具调用失败，已中止后续工具调用。' },
+    error: { message: '[dsh-minimal-guard] circuit breaker tripped\n3 consecutive tool calls failed' },
     content: [],
   })
   const status = await rt.tools.get('guard_status').execute({}, { agent: rt.agent })

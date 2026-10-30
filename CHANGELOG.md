@@ -3,6 +3,28 @@
 All notable changes to `dsh-minimal-router`.
 Format: [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/).
 
+## [1.15.1] — 2026-10-31
+
+把 1.15.0 留下的尾巴做完：**拦截 / 体检 / 熔断 / 降级的原因文案全部英文化**。
+
+这三类文案只在出错时出现，但它们其实是**最该写清楚**的地方——A/B 早就证明，
+精确的拒绝信息比模糊的提示更能让模型自己纠正。所以它们也必须让模型读得懂：
+
+| 原 | 现 |
+|---|---|
+| `【阶段越界】当前阶段=… 请立即调用 route_stage("art")…` | `[out-of-stage] Current stage=… Call route_stage("art")…` |
+| `【本地体检拒绝】第 2 行：… 请立即改写这段代码` | `[local lint] blocked — N high-risk pattern(s): line 2: … Rewrite that code before retrying` |
+| `【dsh-minimal-guard 已熔断】连续 3 次…` | `[dsh-minimal-guard] circuit breaker tripped — 3 consecutive tool calls failed…` |
+| `模型 x 不在已知能力表里，按不安全处理` | `model x is not in the known capability table; treated as unsafe` |
+
+连带修了 **10 处测试断言**（它们断言的正是这些中文文案）。
+两次扫描确认：`reason:` 与 `【` 开头的字符串里，**中文 = 0**。
+
+**288 项测试**。
+
+> 仍然保留中文的只剩：控制台警告、`route_status` / `cache_probe_report` 里的 `hint`、以及注释和文档。
+> 这些要么是给人看的，要么是开发者自己读的。
+
 ## [1.15.0] — 2026-10-31
 
 把**给模型看的东西**全部改成英文。这是本项目里唯一被认定为"功能性缺口"的非代码问题。

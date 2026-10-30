@@ -150,10 +150,10 @@ await test('越界：本阶段允许的组放行', () => {
 await test('越界：跨阶段调用被拦，且提示是祈使句并指名该切到哪', () => {
   const v = decideOutOfStage({ toolName: 'meshy_image_to_3d', stage: 'core', stages: STAGES, claimed: CLAIMED })
   assertEqual(v.allow, false)
-  assert(v.reason.includes('阶段越界'), '要标明越界')
+  assert(v.reason.includes('out-of-stage'), '要标明越界')
   assert(v.reason.includes('meshy'), '要指出是哪个组')
   assert(v.reason.includes('route_stage("art")'), '要明确告诉他该切到哪个阶段')
-  assert(v.reason.includes('请立即'), '必须是祈使句')
+  assert(v.reason.includes('Call route_stage'), '必须是祈使句')
 })
 
 await test('越界：没人认领的新插件标签 → 放行（绝不误杀）', () => {
@@ -462,10 +462,10 @@ await test('体检：有 if 判断的递归 → 不警告', () => {
 await test('体检：报错文案是祈使句，给出行号和修改办法', () => {
   const { findings } = scanCode('function f() {\n  while (true) { x(); }\n}')
   const text = formatFindings(findings, '工具 write')
-  assert(text.includes('【本地体检拒绝】'))
+  assert(text.includes('[local lint]'))
   assert(text.includes('工具 write'))
-  assert(text.includes('第 2 行'), '要能定位到行')
-  assert(text.includes('请立即改写'), '必须给动作指令')
+  assert(text.includes('line 2'), '要能定位到行')
+  assert(text.includes('Rewrite that code'), '必须给动作指令')
 })
 
 await test('工具：matchBrace / lineAt 定位正确', () => {
@@ -672,7 +672,7 @@ await test('集成 —— 铁血：显式切到 core 后，meshy 调用被拦', 
   await rt.tools.get('route_stage').execute({ stage: 'core' }, { agent })
   const decision = await preExecute(rt, { name: 'meshy_image_to_3d', arguments: {}, agent })
   assertEqual(decision.kind, 'deny')
-  assert(decision.reason.includes('阶段越界'))
+  assert(decision.reason.includes('out-of-stage'))
   assertEqual(decision.info.code, 'STAGE_DENIED')
 })
 
@@ -711,7 +711,7 @@ await test('集成 —— 体检：写进死循环代码被当场拦住', async 
     agent,
   })
   assertEqual(decision.kind, 'deny')
-  assert(decision.reason.includes('本地体检拒绝'))
+  assert(decision.reason.includes('[local lint]'))
   assertEqual(decision.info.code, 'LINT_DEAD_LOOP')
 })
 
@@ -774,7 +774,7 @@ await test('集成：route_status 能报出标签分布和最近一次体检命�
   const status = await rt.tools.get('route_status').execute({}, { agent })
   assertEqual(status.toolCount, 13)
   assertEqual(status.tagCounts.unity, 2)
-  assert(status.lastLintHit.includes('本地体检拒绝'))
+  assert(status.lastLintHit.includes('[local lint]'))
   assertEqual(JSON.stringify(JSON.parse(JSON.stringify(status))), JSON.stringify(status), '必须是无损 JSON')
 })
 
@@ -872,13 +872,13 @@ await test('降级：未收录的模型 → 一律按不安全处理（fail-safe
   const cap = resolveCapability({ provider: 'openai', model: 'gpt-5-turbo' })
   assertEqual(cap.safe, false)
   assertEqual(cap.source, 'unknown')
-  assert(cap.reason.includes('不在已知能力表里'))
+  assert(cap.reason.includes('not in the known capability table'))
 })
 
 await test('降级：拿不到模型名 → 不安全（绝不默认放行）', () => {
   const cap = resolveCapability({})
   assertEqual(cap.safe, false)
-  assertEqual(cap.reason.includes('还没拿到当前模型名'), true)
+  assertEqual(cap.reason.includes('model name not known yet'), true)
 })
 
 await test('降级：unsafeForce 可以强行开启（自担风险）', () => {
@@ -1621,7 +1621,7 @@ await test('跨环境：strict 阶段会拒绝"没被任何阶段认领"的标�
   const claimed = claimedTags(stages)
   const stranger = decideOutOfStage({ toolName: 'qq_send', stage: 'chat', stages, claimed })
   assertEqual(stranger.allow, false, 'strict 下未认领标签也要拦')
-  assert(stranger.reason.includes('阶段越界'))
+  assert(stranger.reason.includes('out-of-stage'))
 })
 
 await test('跨环境：默认（非 strict）仍然放行未认领标签，绝不误杀', () => {

@@ -367,7 +367,7 @@ await test('guard: 熔断后 decidePre 返回拒绝文案，逃生门返回 unde
   const blocked = breaker.decidePre(exec)
   // 契约：拒绝时返回一段给模型看的中文说明；放行时返回 undefined
   assert(typeof blocked === 'string' && blocked.length > 0, `熔断后应该返回拒绝文案，实际 ${typeof blocked}`)
-  assert(blocked.includes('熔断'), '文案里要说明已熔断')
+  assert(blocked.includes('circuit breaker'), '文案里要说明已熔断')
   assert(blocked.includes('guard_reset'), '要告诉模型怎么解除')
 
   const escape = breaker.decidePre({ name: 'guard_reset', agent: { id: 'g3' } })

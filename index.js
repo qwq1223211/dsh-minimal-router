@@ -764,7 +764,7 @@ export function apply(ctx, config = {}) {
     model: '',
     source: '',
     systemPromptUpdate: '',
-    reason: '尚未检测到当前模型',
+    reason: 'current model not detected yet',
     warned: '', // 已经警告过的 provider/model 组合，避免刷屏
   }
 

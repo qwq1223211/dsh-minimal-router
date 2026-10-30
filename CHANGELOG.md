@@ -3,6 +3,35 @@
 All notable changes to `dsh-minimal-router`.
 Format: [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/).
 
+## [1.15.0] — 2026-10-31
+
+把**给模型看的东西**全部改成英文。这是本项目里唯一被认定为"功能性缺口"的非代码问题。
+
+### 为什么
+
+`locale/zh.json` 只翻译了插件名和一句话简介（`meta`）。而 **10 个工具的 `description`、
+参数说明、以及每一轮都要发的尾部提示，全是硬编码中文**。
+
+对模型来说，工具的 `description` 就是使用说明书。**英文任务配中文 schema，选工具的准确率会掉**
+——而这正是插件最核心的能力。所以这不叫"不够精致"，叫**对非中文用户降级**。
+
+### Changed
+
+- **10 个工具的 description + 全部参数说明 → 英文**（`route_stage` / `route_status` / `route_init` /
+  `route_reset` / `route_use` / `route_hint` / `cache_probe_report` / `cache_probe_clear` /
+  `guard_status` / `guard_reset`）
+- **尾部路由提示 → 英文**，并压缩措辞让 `unity-code` 这种最长的阶段也**正好落在 200 字内不截断**
+  （英文比中文长，第一版直接顶到上限被截了）
+- 自动检查：`grep` 四个源文件，**中文 description 行数 = 0**
+
+### 还没做的（下一批）
+
+- 拦截文案 / 体检文案 / 熔断提示（`【阶段越界】…`、`【已熔断】…`）仍为中文 —— 这些只在出错时出现
+- 控制台警告（`[minimal-router] …`）仍为中文 —— 这些是给人看的
+- `route_status` / `cache_probe_report` 返回里的 `hint` 字段仍为中文
+
+**288 项测试**。
+
 ## [1.14.1] — 2026-10-31
 
 把 allow 模式真机跑了 8 个会话。结论是：**它更省，但会藏坏工具 —— 所以默认必须保持 deny。**

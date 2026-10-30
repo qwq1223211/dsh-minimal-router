@@ -371,8 +371,9 @@ await test('提示：auto 阶段的提示很短，且不制造约束感', () => 
 await test('提示：具体阶段只列可用组，不再列禁止组（A/B 实测：列禁止组会让模型放弃）', () => {
   const h = renderHint({ stage: 'unity-code', stages: STAGES, claimed: CLAIMED })
   assert(h.text.includes('unity-code'))
-  assert(h.text.includes('可用组=unity'), '要告诉模型这轮能用什么')
-  assertEqual(h.text.includes('禁止组'), false, '禁止组清单被截断后会误导模型，已移除')
+  // 【i18n】这段是给模型看的，已改成英文
+  assert(h.text.includes('allowed=unity'), '要告诉模型这轮能用什么')
+  assertEqual(h.text.includes('forbidden'), false, '禁止组清单被截断后会误导模型，已移除')
   assert(h.text.includes('route_stage("auto")'), '要给出一个永远正确的逃生动作')
   assert(h.length <= HINT_LIMIT)
 })
@@ -1896,7 +1897,9 @@ await test('A/B：route_status 反映提示开关状态', async () => {
 await test('A/B 产出：提示不能说"会被拦截"（物理摘除时根本没有拦截这一步）', () => {
   const out = renderHint({ stage: 'unity-code', stages: DEFAULT_STAGES, claimed: REAL_CLAIMED })
   assertEqual(out.text.includes('立刻拦截'), false, '工具是被移出列表的，不是调用时报错')
-  assert(out.text.includes('移出列表'), '必须说清它去哪了')
+  // 【i18n】英文版用 hidden 表达"已移出列表"，且必须明说 not an error
+  assert(out.text.includes('hidden'), '必须说清它去哪了')
+  assert(out.text.includes('not broken') || out.text.includes('not an error'), '要说明这不是报错')
   assert(out.text.includes('route_stage("auto")'), '逃生动作要指向 auto（永远全放开），不能写死某个具体阶段')
   assert(out.length <= 200, `仍要受长度上限约束，实际 ${out.length}`)
 })

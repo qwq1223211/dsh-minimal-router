@@ -913,15 +913,15 @@ export function apply(ctx, config = {}) {
     ctx.tools.register({
       name: 'route_stage',
       description:
-        '切换当前任务阶段。阶段决定本阶段允许哪些工具组（如 unity_*/ui_*/art_*/meshy_*）。用错组会被拦截，拦截提示里会告诉你该切到哪个阶段。',
+        'Switch the stage for the current task. A stage decides which tool groups are available (e.g. unity_*/ui_*/art_*/meshy_*). Calling a tool from a disallowed group is blocked, and the block message tells you which stage to switch to.',
       parameters: {
         type: 'object',
         additionalProperties: false,
         properties: {
-          stage: { type: 'string', description: '阶段名，例如 core / unity-code / unity-ui / art / audio / auto。' },
+          stage: { type: 'string', description: 'Stage name, e.g. core / unity-code / unity-ui / art / audio / auto.' },
           force: {
             type: 'boolean',
-            description: '上下文超过安全阈值时仍然强行切换（会触发一次全量缓存重建，确认自担风险再用）。',
+            description: 'Switch even when the context exceeds the safety threshold (triggers a full-price prefix rebuild — use only if you accept the cost).',
           },
         },
         required: ['stage'],
@@ -977,7 +977,8 @@ export function apply(ctx, config = {}) {
   ctx.effect(() =>
     ctx.tools.register({
       name: 'route_status',
-      description: '查看路由器的当前状态：当前阶段、可用阶段、工具标签分布、最近一次体检命中。只读。',
+      description:
+        'Read the router state: current stage, available stages, tool-group distribution, the last lint hit, and whether trimming is actually effective. Read-only.',
       parameters: { type: 'object', additionalProperties: false, properties: {} },
       output: RENDER,
       async execute(_args, exec) {
@@ -1173,7 +1174,7 @@ export function apply(ctx, config = {}) {
     ctx.tools.register({
       name: 'route_init',
       description:
-        '生成阶段配置。不带参数：扫描当前环境的真实工具，写出一份 custom_stages.sample.json 模板（不会自动加载）。带 preset 参数：直接把内置示例配置写成可用的 custom_stages.json（改完要重载插件）。',
+        'Generate stage configuration. Without arguments: scan the tools actually installed here and write a custom_stages.sample.json template (not auto-loaded). With preset: write a ready-to-use custom_stages.json from a bundled example (reload the plugin afterwards).',
       parameters: {
         type: 'object',
         additionalProperties: false,
@@ -1181,7 +1182,7 @@ export function apply(ctx, config = {}) {
           preset: {
             type: 'string',
             description:
-              '内置示例之一：python-data / web-dev / writing / qq-chat。给了它就会直接写出可用的 custom_stages.json。',
+              'A bundled example: python-data / web-dev / writing / qq-chat. Writes a ready-to-use custom_stages.json directly.',
           },
         },
       },

@@ -22,11 +22,20 @@ jobs:
           node-version: 22
 
       # 发布前必须先绿：一个测试挂着的 tag 不该被发成 Release。
-      - name: 跑全部测试
+      # 这里要和 CI 一样严——少跑一项就等于给"发出去的版本"开了个后门。
+      - name: 跑全部测试（含模糊 + 模拟安装）
         run: |
           node test/router.test.mjs
           node test/guard.test.mjs
           node test/probe.test.mjs
+          node test/fuzz.test.mjs
+          node test/install-elsewhere.test.mjs
+
+      - name: 仓库自检
+        run: node scripts/lint.mjs
+
+      - name: 依赖与入口体检
+        run: node scripts/audit-deps.mjs
 
       # 三处版本号必须一致（package.json / 三个 README / CHANGELOG）。
       # v1.3.0 那次就是这里没校验，README 标题停在旧版本。

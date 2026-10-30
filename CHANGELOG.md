@@ -3,6 +3,40 @@
 All notable changes to `dsh-minimal-router`.
 Format: [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/).
 
+## [1.14.1] — 2026-10-31
+
+把 allow 模式真机跑了 8 个会话。结论是：**它更省，但会藏坏工具 —— 所以默认必须保持 deny。**
+
+### 实测（同阶段 core、同任务、只差 restrictMode，每臂 4 个会话）
+
+| 组 | tools | toolsChars | `read` 可用？ |
+|---|---|---|---|
+| 不裁剪（auto） | 172 | 138,711 | ✅ |
+| **deny**（默认） | **72** | **50,101** | ✅ |
+| **allow** | **39** | **17,015** | ❌ **4/4 全丢** |
+
+**allow 再省 66%**（17,015 vs 50,101 字节），但 4 个会话**全部**报
+`Error: unknown tool "read"`，只能改用终端读文件。
+
+### 为什么
+
+`restrict({allow})` 的语义是"只留点名的"。而 **`read` / `write` 这类作用域本地注册的工具
+不在 `restrictableNames` 里** —— 我们点不出它们的名字，于是 allow 列表里没有它们，
+被"只留点名的"一起藏掉。这不是 bug，是语义决定的。
+
+所以：
+
+- **`deny` 保持默认**（只摘点得出名字的工具，不误伤）
+- `allow` 保留为可选，并在 `cordis.patch.yml` 与文档里写明"会隐藏点不出名字的工具，可能丢功能"
+
+### 顺带一个解释了很久的谜
+
+`estimatedAdvertised` 一直报 **38**，两个模式都一样。实际：allow 是 **39**（38 + `run_code`），
+deny 是 **72**。也就是说**这个估算描述的其实是 allow 语义**——拿它去解释 deny 当然对不上。
+这就是 1.13.2/1.13.3 里那个"38 vs 72"谜团的最外层解释。
+
+**288 项测试**。
+
 ## [1.14.0] — 2026-10-31
 
 从 DSH 源码里确认了 `restrict()` 的真实签名之后，补上两条**根治性**的改动。

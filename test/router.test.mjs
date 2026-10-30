@@ -1774,6 +1774,74 @@ await test('累积披露：route_reset 会清空累积状态（回到严格裁�
 })
 
 // ============================================================================
+// 10.13 任务驱动：零配置的按需收窄（route_use）
+// ============================================================================
+await test('任务驱动：route_use 只留指定组，其余全摘（不需要任何阶段配置）', async () => {
+  const rt = makeFakeCtx()
+  apply(rt.ctx, { enforceByRestrict: true })
+  const agent = rt.makeAgent('u1')
+  const out = await rt.tools.get('route_use').execute({ groups: ['unity'] }, { agent })
+  assertEqual(out.ok, true)
+  const deny = rt.restricts[rt.restricts.length - 1].deny
+  assertEqual(deny.includes('unity_object_create'), false, 'unity 组要留着')
+  assert(deny.includes('ui_add'), 'ui 组要摘掉')
+  assert(deny.includes('meshy_image_to_3d'), 'meshy 组要摘掉')
+  assertEqual(deny.includes('read'), false, '基础工具要留着')
+})
+
+await test('任务驱动：逃生门在收窄状态下依然可用（永不锁死）', async () => {
+  const rt = makeFakeCtx()
+  apply(rt.ctx, { enforceByRestrict: true })
+  const agent = rt.makeAgent('u2')
+  await rt.tools.get('route_use').execute({ groups: ['unity'] }, { agent })
+  const deny = rt.restricts[rt.restricts.length - 1].deny
+  for (const name of ['route_use', 'route_stage', 'route_status', 'route_reset', 'cache_probe_report']) {
+    assertEqual(deny.includes(name), false, `${name} 在任何收窄状态下都不能被摘`)
+  }
+})
+
+await test('任务驱动：传空数组立刻放开全部', async () => {
+  const rt = makeFakeCtx()
+  apply(rt.ctx, { enforceByRestrict: true })
+  const agent = rt.makeAgent('u3')
+  await rt.tools.get('route_use').execute({ groups: ['unity'] }, { agent })
+  const before = rt.restricts.length
+  const out = await rt.tools.get('route_use').execute({ groups: [] }, { agent })
+  assertEqual(out.released, true)
+  const status = await rt.tools.get('route_status').execute({}, { agent })
+  assertEqual(status.dynamicGroups.length, 0, '放开后不该还有动态组')
+  assert(rt.restricts.length >= before)
+})
+
+await test('任务驱动：到期自动恢复，不用记着撤销', async () => {
+  const rt = makeFakeCtx()
+  apply(rt.ctx, { enforceByRestrict: true })
+  const agent = rt.makeAgent('u4')
+  await rt.tools.get('route_use').execute({ groups: ['unity'], turns: 2 }, { agent })
+  let status = await rt.tools.get('route_status').execute({}, { agent })
+  assertEqual(status.dynamicTurnsLeft, 2)
+
+  const listener = (rt.listeners.get('agent/inbox/claimed') || [])[0]
+  listener({ agent, message: { content: [{ type: 'text', text: '继续' }] } })
+  status = await rt.tools.get('route_status').execute({}, { agent })
+  assertEqual(status.dynamicTurnsLeft, 1, '第一轮后还剩 1')
+
+  listener({ agent, message: { content: [{ type: 'text', text: '继续' }] } })
+  status = await rt.tools.get('route_status').execute({}, { agent })
+  assertEqual(status.dynamicGroups.length, 0, '到期后应该自动放开')
+})
+
+await test('任务驱动：切阶段会取消动态收窄（两套规则不打架）', async () => {
+  const rt = makeFakeCtx()
+  apply(rt.ctx, { enforceByRestrict: true })
+  const agent = rt.makeAgent('u5')
+  await rt.tools.get('route_use').execute({ groups: ['unity'] }, { agent })
+  await rt.tools.get('route_stage').execute({ stage: 'core' }, { agent })
+  const status = await rt.tools.get('route_status').execute({}, { agent })
+  assertEqual(status.dynamicGroups.length, 0)
+})
+
+// ============================================================================
 // 11. 配置
 // ============================================================================
 await test('配置：脏数据自动回退，不会把插件搞挂', () => {

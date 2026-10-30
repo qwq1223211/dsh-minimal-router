@@ -480,6 +480,8 @@ export function apply(ctx, config = {}) {
   const restrictions = new Map() // key → { dispose, stage, denyCount, visible }
   // 【累积披露】key → 本会话里"已经露过面"的标签集合
   const disclosedTags = new Map()
+  // 【任务驱动】key → { groups:Set, remainingTurns, createdAt } 临时收窄工具面
+  const dynamicGrants = new Map()
   // 每个会话最近一次请求的真实上下文长度（token），安全闸门用
   const promptTokensBySession = new Map()
   // 已经被闸门拦过的会话（用于"只警告一次"）
@@ -561,9 +563,20 @@ export function apply(ctx, config = {}) {
     if (!guard.safe) return { applied: false, reason: 'degraded', stage }
 
     const current = restrictions.get(key)
-    // 阶段没变就不折腾，避免无谓的前缀抖动
-    if (current && current.stage === stage) {
-      return { applied: false, reason: 'unchanged', stage, deny: current.denyCount, visible: current.visible }
+    // 【任务驱动】本会话有动态收窄授权时，它优先于阶段规则
+    const grant = dynamicGrants.get(key)
+    const grantGroups = grant && grant.groups && grant.groups.size > 0 ? grant.groups : null
+    const signature = grantGroups ? `dyn:${[...grantGroups].sort().join(',')}` : `stage:${stage}`
+    // 签名没变就不折腾，避免无谓的前缀抖动
+    if (current && current.signature === signature) {
+      return {
+        applied: false,
+        reason: 'unchanged',
+        stage,
+        signature,
+        deny: current.denyCount,
+        visible: current.visible,
+      }
     }
 
     // 1) 先拆掉旧限制（必须在新列表计算之前）
@@ -576,8 +589,8 @@ export function apply(ctx, config = {}) {
       restrictions.delete(key)
     }
 
-    // 2) auto 阶段不限
-    if (stage === 'auto') return { applied: false, reason: 'auto-stage', stage }
+    // 2) auto 阶段不限（但显式的动态收窄优先）
+    if (!grantGroups && stage === 'auto') return { applied: false, reason: 'auto-stage', stage }
 
     // 3) 必须拿到会话级 ctx
     const agent = agentRefs.get(key)
@@ -596,7 +609,17 @@ export function apply(ctx, config = {}) {
               .map((tool) => (tool && typeof tool.name === 'string' ? tool.name : ''))
               .filter(Boolean)
           : []
-      let deny = computeDenyList({ toolNames: names, stage, stages: cfg.stages, claimed, coreTools: cfg.coreTools })
+      let deny
+      if (grantGroups) {
+        // 【任务驱动】只留这组 + core + 逃生门，其余全摘
+        const allowed = new Set([...grantGroups, 'core'])
+        deny = names.filter((name) => {
+          if (ALWAYS_ALLOW.includes(name)) return false
+          return !allowed.has(tagOf(name, cfg.coreTools))
+        })
+      } else {
+        deny = computeDenyList({ toolNames: names, stage, stages: cfg.stages, claimed, coreTools: cfg.coreTools })
+      }
 
       // 【累积披露】本会话里已经露过面的组，不再收回。
       // 好处：工具表只会变大不会变小 → 每次切换的差异更小，前缀缓存更稳。
@@ -618,8 +641,8 @@ export function apply(ctx, config = {}) {
         return { applied: false, reason: 'nothing-to-deny', stage, visible: names.length }
       }
       const dispose = scopedTools.restrict({ deny })
-      restrictions.set(key, { dispose, stage, denyCount: deny.length, visible: names.length })
-      return { applied: true, reason: 'ok', stage, deny: deny.length, visible: names.length }
+      restrictions.set(key, { dispose, stage, signature, denyCount: deny.length, visible: names.length })
+      return { applied: true, reason: 'ok', stage, signature, deny: deny.length, visible: names.length }
     } catch (error) {
       return { applied: false, reason: `error:${error && error.message ? error.message : String(error)}`, stage }
     }
@@ -831,6 +854,8 @@ export function apply(ctx, config = {}) {
         if (!result.ok) {
           return { ok: false, stage: state.get(key).stage, error: result.error, available: Object.keys(cfg.stages) }
         }
+        // 切阶段就取消任务驱动的临时收窄，免得两套规则互相盖住
+        dynamicGrants.delete(key)
         const restriction = refreshRestriction(key, exec && exec.agent)
         const economy = estimateForStage(key, result.stage)
         return {
@@ -929,6 +954,9 @@ export function apply(ctx, config = {}) {
           // 迟滞/冷却状态：为什么刚才那句关键词没让阶段变
           switchArbiter: switchArbiter.snapshot(key),
           lastArbiterDecision,
+          // 任务驱动的临时收窄（route_use）
+          dynamicGroups: dynamicGrants.get(key) ? [...dynamicGrants.get(key).groups] : [],
+          dynamicTurnsLeft: dynamicGrants.get(key) ? dynamicGrants.get(key).remainingTurns : 0,
           // 成本闸门：每个阶段"现在切过去"值不值（按最坏情况估）
           switchEconomics: {
             enabled: cfg.costGateEnabled,
@@ -983,6 +1011,7 @@ export function apply(ctx, config = {}) {
         state.reset(key)
         switchArbiter.reset(key)
         disclosedTags.delete(key)
+        dynamicGrants.delete(key)
         lastArbiterDecision = null
         lastLintHit = ''
         const restriction = refreshRestriction(key, exec && exec.agent)
@@ -992,6 +1021,65 @@ export function apply(ctx, config = {}) {
           stage: state.get(key).stage,
           restriction,
           message: '已复位到默认阶段，可以继续。',
+        }
+      },
+    }),
+  )
+
+  // ------------------------------------------------------------------
+  // 4.4 工具 4：route_use —— 任务驱动的一次性收窄（不需要任何阶段配置）
+  //
+  // 【为什么要有它】预设阶段要求用户"先知道自己要做什么"。
+  // route_use 把这份判断交回给**模型自己**：这一轮需要哪几组，就只要哪几组，
+  // 过期自动放开。零配置、可撤销，不依赖任何 custom_stages.json。
+  // ------------------------------------------------------------------
+  ctx.effect(() =>
+    ctx.tools.register({
+      name: 'route_use',
+      description:
+        '按需收窄当前会话可见的工具组（不需要预设阶段）。只保留指定组 + 基础工具，其余工具被临时摘掉；到期或 route_reset 后自动恢复。传空数组可立即放开。组名见 route_status 的 tagCounts。',
+      parameters: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          groups: {
+            type: 'array',
+            items: { type: 'string' },
+            description: '要保留的工具组名（如 ["unity"]）；传空数组等于立即放开全部',
+          },
+          turns: {
+            type: 'integer',
+            minimum: 1,
+            maximum: 20,
+            description: '保持多少轮（默认 3）。到点自动恢复，不用记着撤销。',
+          },
+        },
+        required: ['groups'],
+      },
+      output: RENDER,
+      async execute(args, exec) {
+        const key = keyOf(exec)
+        const raw = args && Array.isArray(args.groups) ? args.groups : []
+        const groups = raw
+          .filter((g) => typeof g === 'string' && g.trim())
+          .map((g) => g.trim().toLowerCase())
+        const turnsRaw = args && Number.isFinite(Number(args.turns)) ? Math.trunc(Number(args.turns)) : 3
+        const turns = Math.min(20, Math.max(1, turnsRaw))
+
+        if (groups.length === 0) {
+          dynamicGrants.delete(key)
+          const restriction = refreshRestriction(key, exec && exec.agent)
+          return { ok: true, released: true, restriction, message: '已放开全部工具组。' }
+        }
+
+        dynamicGrants.set(key, { groups: new Set(groups), remainingTurns: turns, createdAt: Date.now() })
+        const restriction = refreshRestriction(key, exec && exec.agent)
+        return {
+          ok: true,
+          groups,
+          turns,
+          restriction,
+          message: `已收窄到 ${groups.join('/')}，${turns} 轮后自动恢复。用完可 route_use({"groups":[]}) 立刻放开。`,
         }
       },
     }),
@@ -1176,6 +1264,16 @@ export function apply(ctx, config = {}) {
       const text = textOfMessage(payload && payload.message)
       const threshold = cfg.contextGuardThreshold
       const contextTokens = promptTokensBySession.get(key) || 0
+      // ---- 闸门 0：任务驱动的收窄到期自动恢复 ----
+      const activeGrant = dynamicGrants.get(key)
+      if (activeGrant) {
+        activeGrant.remainingTurns -= 1
+        if (activeGrant.remainingTurns <= 0) {
+          dynamicGrants.delete(key)
+          refreshRestriction(key, payload && payload.agent)
+        }
+      }
+
       const detected = detectStage(text, cfg.stages, cfg.stageOrder)
       const current = state.get(key).stage
 

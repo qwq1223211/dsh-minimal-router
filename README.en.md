@@ -126,6 +126,26 @@ It writes a ready-to-use `custom_stages.json`; reload the plugin and you are don
 
 Calling `route_init` with no arguments is the other path: scan your environment and emit a template to edit.
 
+### The zero-config path: let the model decide what it needs this turn
+
+**No stage table required.** The built-in `route_use` tool narrows the tool set on demand:
+
+```text
+route_use({ "groups": ["unity"], "turns": 3 })
+```
+
+It keeps the `unity` group plus the base tools, trims everything else, and **restores automatically after
+3 turns** — nothing to remember to undo. `route_use({ "groups": [] })` releases immediately.
+
+Where do group names come from? `route_status` → `tagCounts`. They are derived from tool names, so you never
+define a workflow up front.
+
+> **Why not a per-turn judging model?**
+> That is one extra request per turn, with the whole context re-sent at full price. Measured here: 99.9% of
+> the tokens this plugin saves are **cache-priced**, so paying one full-price request to save cheap tokens is
+> a net loss. The judgement goes back to the model that is already in the context — it knows what it is doing;
+> one tool lets it say so, at zero extra cost.
+
 ```powershell
 # ask the agent:
 route_init

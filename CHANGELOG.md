@@ -3,6 +3,39 @@
 All notable changes to `dsh-minimal-router`.
 Format: [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/).
 
+## [1.6.0] — 2026-10-30
+
+The zero-config path: task-driven narrowing without a stage table.
+
+### Added
+
+- **`route_use({ groups, turns })`** — narrow the visible tool set to the named groups (plus base tools and the
+  escape hatch) for `turns` user turns (default 3, max 20), then restore automatically. `groups: []` releases
+  immediately. Group names are the tags `route_status` already derives from tool names, so **no
+  `custom_stages.json` is involved**. This answers "the plugin requires you to predefine your workflow": you
+  no longer have to.
+- `route_status` reports `dynamicGroups` / `dynamicTurnsLeft`; `route_stage` and `route_reset` clear any
+  dynamic grant so the two mechanisms cannot shadow each other.
+- 5 new tests (router 145 → 150; **202 total**), including one that asserts `route_use` and the probe tools
+  survive being narrowed.
+
+### Deliberately not implemented: a per-turn judging model
+
+The review proposed deciding each turn's tool set with a small classifier. That is one extra request per
+turn with the entire context re-sent at full price. Measured on this project, 99.9% of the tokens the plugin
+saves are cache-priced — so paying one full-price request to save cheap tokens is a net loss. The judgement
+stays with the model already in the context (`route_use`), which costs nothing extra.
+
+### Also not implemented, and why
+
+- **Defer-loading catalog anchors**: our tail hint already names the allowed and forbidden groups, capped at
+  `hintMaxChars`. A second catalog block would spend prompt space to describe tools that are not in the
+  prompt — the opposite of the goal.
+- **Implicit LLM-generated grouping**: `route_init` already derives groups from tool names deterministically
+  and offline; an LLM pass would add latency and a failure mode to a step that has neither.
+- **Budget tiers**: worth revisiting only once switching cost is stable enough to model, which 1.2.0 showed it
+  is not (bimodal: 0.2–1.2% vs 98–99% of context).
+
 ## [1.5.0] — 2026-10-30
 
 Two things from a review of the ecosystem's failure modes: one real lockout bug, one cache-stability lever.

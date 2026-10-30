@@ -1,11 +1,55 @@
 # dsh-minimal-router · v1.0.0
 
+[![Tests](https://github.com/qwq1223211/dsh-minimal-router/actions/workflows/test.yml/badge.svg)](https://github.com/qwq1223211/dsh-minimal-router/actions/workflows/test.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
+[![DeepSeek Harness](https://img.shields.io/badge/DSH-plugin-4F7CFF)](https://github.com/deepseek-ai/deepseek-harness)
+[![Tools](https://img.shields.io/badge/tools%20per%20request-165%20%E2%86%92%2066-orange)](#numbers-same-machine-same-model-measured-with-dsh-cache-probe)
+
 > **Give the model only the tools it needs right now.** Fixed prefix, variable tail.
-> Measured: **165 tools → 69 tools**, **131,694 → 48,837 bytes** of tool declarations per request.
+> Measured in a fresh session: **165 tools → 66 tools**, **131,694 → 43,238 bytes** (−67.2%),
+> **promptTokens 47,885 → 25,688** (−46.4%) at **99.16%** cache hit.
 
 A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) host plugin. No build step, no dependencies.
 
 ---
+
+## Install
+
+### Option 1 · Just ask the agent (easiest)
+
+Open DSH and tell the AI:
+
+> Install this plugin for me: https://github.com/qwq1223211/dsh-minimal-router
+
+Then go to **Settings → Plugins** and **disable, then enable** the "Minimal Router" row.
+A linked install does not hot-reload, so this step is mandatory.
+
+### Option 2 · Terminal
+
+```bash
+dsh plugin --profile desktop add github:qwq1223211/dsh-minimal-router
+```
+
+> This simply forwards its arguments to `pnpm` inside the profile directory.
+> If the plugin does not appear in the list afterwards, ask the agent to enable the
+> `dsh-minimal-router` bundle, or toggle it on under Settings → Plugins.
+
+### Option 3 · Clone and install locally (always works)
+
+```bash
+git clone https://github.com/qwq1223211/dsh-minimal-router.git
+```
+
+Then hand the agent the **absolute path** of that folder:
+
+> Install this directory as a bundle: `<absolute path>/dsh-minimal-router`
+
+No registry, no package-name resolution, nothing but the clone. **If options 1 and 2 fail, use this one.**
+
+### Verify
+
+Ask the agent for `route_status`. A JSON payload containing `stages`, `tagCounts`, and `modelGuard`
+means the plugin is installed and live.
 
 ## Why
 

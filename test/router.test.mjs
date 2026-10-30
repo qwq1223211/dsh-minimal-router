@@ -24,7 +24,7 @@ import {
   suggestStageForTag,
   computeDenyList,
 } from '../lib/classify.js'
-import { createStageState, detectStage, textOfMessage, keywordMatches } from '../lib/stage.js'
+import { createStageState, detectStage, textOfMessage, keywordMatches, isExplicitSwitch, createSwitchArbiter } from '../lib/stage.js'
 import { renderHint, HINT_LIMIT } from '../lib/prompt.js'
 import { stripNoise, scanCode, formatFindings, matchBrace, lineAt } from '../lib/lint.js'
 import { resolveCapability, formatDegradeWarning, KNOWN_CAPABILITIES } from '../lib/model-guard.js'
@@ -739,9 +739,10 @@ await test('集成 —— 关键词自动切阶段，之后越界被拦', async 
   const rt = makeFakeCtx()
   apply(rt.ctx, {})
   const agent = { id: 'session-B' }
-  // 模拟用户说"生成一张贴图"
+  // 模拟用户说"生成一张贴图"（迟滞默认要连续 2 次，所以发两次）
   const claimedListener = (rt.listeners.get('agent/inbox/claimed') || [])[0]
   claimedListener({ agent, message: { content: [{ type: 'text', text: '生成一张贴图' }] } })
+  claimedListener({ agent, message: { content: [{ type: 'text', text: '再生成一张贴图' }] } })
   const status = await rt.tools.get('route_status').execute({}, { agent })
   assertEqual(status.stage, 'art')
   assertEqual(status.by, 'keyword')
@@ -1289,10 +1290,95 @@ await test('闸门：上下文不大时，关键词照常切阶段', async () =>
   const agent = rt.makeAgent('small')
   await feedContext(rt, 'small', 20000)
   const listener = (rt.listeners.get('agent/inbox/claimed') || [])[0]
+  // 迟滞默认 2：连续两次同向信号才切
   listener({ agent, message: { content: [{ type: 'text', text: '生成一张贴图' }] } })
+  listener({ agent, message: { content: [{ type: 'text', text: '再生成一张贴图' }] } })
   const status = await rt.tools.get('route_status').execute({}, { agent })
   assertEqual(status.stage, 'art')
   assertEqual(status.lastBlockedSwitch, null)
+})
+
+// ============================================================================
+// 10.7 迟滞 / 冷却（P0-a）：抑制"顺嘴提一句就切阶段"的抖动
+// ============================================================================
+await test('迟滞：显式命令的说法能被识别', () => {
+  assertEqual(isExplicitSwitch('切到 core 阶段'), true)
+  assertEqual(isExplicitSwitch('切换到美术阶段'), true)
+  assertEqual(isExplicitSwitch('switch to art stage'), true)
+  assertEqual(isExplicitSwitch('生成一张贴图'), false, '随口提到的不算显式命令')
+})
+
+await test('迟滞：默认要连续 2 次同向信号才切', () => {
+  const arbiter = createSwitchArbiter({ confirmations: 2, cooldownMs: 0 })
+  const first = arbiter.decide({ key: 'k', detected: 'art', explicit: false, now: 1000 })
+  assertEqual(first.switch, false)
+  assertEqual(first.reason, 'pending')
+  assertEqual(first.pendingCount, 1)
+  const second = arbiter.decide({ key: 'k', detected: 'art', explicit: false, now: 2000 })
+  assertEqual(second.switch, true)
+  assertEqual(second.reason, 'confirmed')
+})
+
+await test('迟滞：显式命令立刻切，不用等第二次', () => {
+  const arbiter = createSwitchArbiter({ confirmations: 3, cooldownMs: 0 })
+  const decision = arbiter.decide({ key: 'k', detected: 'core', explicit: true, now: 1000 })
+  assertEqual(decision.switch, true)
+  assertEqual(decision.reason, 'explicit')
+})
+
+await test('迟滞：冷却期内不切，冷却过后才生效', () => {
+  const arbiter = createSwitchArbiter({ confirmations: 2, cooldownMs: 10000 })
+  arbiter.noteSwitched({ key: 'k', now: 1000 })
+  const hot = arbiter.decide({ key: 'k', detected: 'art', explicit: false, now: 2000 })
+  assertEqual(hot.switch, false)
+  assertEqual(hot.reason, 'cooldown')
+  assert(hot.remainingMs > 0, '要能报出还剩多久')
+  // 冷却过后：信号已经累计到 2，所以这一次直接放行
+  const later = arbiter.decide({ key: 'k', detected: 'art', explicit: false, now: 20000 })
+  assertEqual(later.switch, true)
+})
+
+await test('迟滞：中途换方向会重置计数', () => {
+  const arbiter = createSwitchArbiter({ confirmations: 2, cooldownMs: 0 })
+  arbiter.decide({ key: 'k', detected: 'art', explicit: false, now: 1000 })
+  const other = arbiter.decide({ key: 'k', detected: 'audio', explicit: false, now: 2000 })
+  assertEqual(other.switch, false)
+  assertEqual(other.pendingCount, 1, '换了方向要重新数')
+})
+
+await test('迟滞：不同会话互不干扰', () => {
+  const arbiter = createSwitchArbiter({ confirmations: 2, cooldownMs: 0 })
+  arbiter.decide({ key: 'a', detected: 'art', explicit: false, now: 1000 })
+  const otherSession = arbiter.decide({ key: 'b', detected: 'art', explicit: false, now: 1000 })
+  assertEqual(otherSession.switch, false)
+  assertEqual(otherSession.pendingCount, 1)
+})
+
+await test('迟滞集成：一句关键词不再立刻切阶段（走真实入口）', async () => {
+  const rt = makeFakeCtx()
+  apply(rt.ctx, {})
+  const agent = rt.makeAgent('h1')
+  const listener = (rt.listeners.get('agent/inbox/claimed') || [])[0]
+  listener({ agent, message: { content: [{ type: 'text', text: '生成一张贴图' }] } })
+  let status = await rt.tools.get('route_status').execute({}, { agent })
+  assertEqual(status.stage, 'auto', '第一次不该切')
+  assertEqual(status.switchArbiter.pendingStage, 'art')
+  assertEqual(status.switchArbiter.pendingCount, 1)
+
+  listener({ agent, message: { content: [{ type: 'text', text: '再生成一张贴图' }] } })
+  status = await rt.tools.get('route_status').execute({}, { agent })
+  assertEqual(status.stage, 'art', '第二次才切')
+})
+
+await test('迟滞集成：显式"切到 X 阶段"一句话就切', async () => {
+  const rt = makeFakeCtx()
+  apply(rt.ctx, {})
+  const agent = rt.makeAgent('h2')
+  const listener = (rt.listeners.get('agent/inbox/claimed') || [])[0]
+  listener({ agent, message: { content: [{ type: 'text', text: '切到美术阶段' }] } })
+  const status = await rt.tools.get('route_status').execute({}, { agent })
+  assertEqual(status.stage, 'art')
+  assertEqual(status.lastArbiterDecision.reason, 'explicit')
 })
 
 // ============================================================================

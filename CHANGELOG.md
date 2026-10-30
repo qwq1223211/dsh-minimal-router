@@ -3,6 +3,31 @@
 All notable changes to `dsh-minimal-router`.
 Format: [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/).
 
+## [1.1.0] — 2026-10-30
+
+Attacks v1.0.0's biggest risk: a stage switch costs anywhere from **3,205** to **513,857**
+full-price tokens (same action, 160× difference depending on context size). This release makes
+switching rarer, and makes version failures readable.
+
+### Added
+
+- **Switch hysteresis.** Keyword-driven stage changes now need `switchConfirmations` (default **2**)
+  consecutive signals pointing at the same stage, plus a `switchCooldownMs` (default **120 s**) cooldown
+  after every switch. Explicit commands ("switch to core", "切到美术阶段") still apply on the first message.
+  Motivation: one stray mention of "UI" inside a Unity task used to trigger a real prefix rebuild.
+- **`engines.dsh: ">=0.2.1-rc.4"`** — an incompatible host now produces a readable install error
+  instead of a cryptic load failure.
+- `route_status` reports `switchArbiter` (pending stage/count, cooldown remaining) and
+  `lastArbiterDecision`, so "why didn't the stage change?" has an answer.
+- 8 new tests (router 105 → 113; **165 total** across the three modules).
+
+### Changed
+
+- **Behaviour change:** a single keyword mention no longer switches the stage. Send a second confirming
+  message, or say it explicitly. Set `switchConfirmations: 1` to restore the old behaviour.
+- The README install section now marks the *disable → enable* step as mandatory and names the failure mode
+  ("looks installed but does nothing").
+
 ## [1.0.0] — 2026-10-30
 
 First public release. Built and measured on a real DSH profile with 40+ plugins.

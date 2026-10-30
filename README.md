@@ -1,4 +1,4 @@
-# dsh-minimal-router · v1.0.0
+# dsh-minimal-router · v1.1.0
 
 [![Tests](https://github.com/qwq1223211/dsh-minimal-router/actions/workflows/test.yml/badge.svg)](https://github.com/qwq1223211/dsh-minimal-router/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
@@ -21,8 +21,9 @@ Open DSH and tell the AI:
 
 > Install this plugin for me: https://github.com/qwq1223211/dsh-minimal-router
 
-Then go to **Settings → Plugins** and **disable, then enable** the "Minimal Router" row.
-A linked install does not hot-reload, so this step is mandatory.
+> ⚠️ **This step is mandatory — without it the plugin looks installed but does nothing:**
+> **Settings → Plugins → disable the "Minimal Router" row, then enable it again.**
+> (A linked install does not hot-reload, so you would still be running the old code.)
 
 ### Option 2 · Terminal
 

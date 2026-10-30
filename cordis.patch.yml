@@ -23,6 +23,10 @@
         lintMode: deny
         # 安全闸门：上次请求超过这个 token 数就拦住切阶段（0 = 关闭）
         contextGuardThreshold: 100000
+        # 迟滞：随口提到的关键词要连续几次指向同一阶段才真的切（1 = 不迟滞）
+        switchConfirmations: 2
+        # 冷却：刚切过一次之后，多少毫秒内不再自动切换（0 = 关闭）
+        switchCooldownMs: 120000
         # 降级保护：只有确认模型支持"系统提示追加到历史"才开尾插
         # 开源给别人用时必须保持 true
         requireInHistoryUpdates: true

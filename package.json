@@ -1,6 +1,6 @@
 {
   "name": "@local/dsh-minimal-router",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "main": "./index.js",
@@ -16,6 +16,9 @@
     "bundle": {
       "patch": "./cordis.patch.yml"
     }
+  },
+  "engines": {
+    "dsh": ">=0.2.1-rc.4"
   },
   "files": [
     "index.js",

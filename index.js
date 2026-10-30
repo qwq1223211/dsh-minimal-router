@@ -31,7 +31,7 @@ import {
   decideOutOfStage,
   computeDenyList,
 } from './lib/classify.js'
-import { createStageState, textOfMessage, detectStage } from './lib/stage.js'
+import { createStageState, textOfMessage, detectStage, isExplicitSwitch, createSwitchArbiter } from './lib/stage.js'
 import { renderHint, HINT_LIMIT } from './lib/prompt.js'
 import { scanCode, formatFindings } from './lib/lint.js'
 import { resolveCapability, formatDegradeWarning } from './lib/model-guard.js'
@@ -164,6 +164,11 @@ const CONFIG_DEFAULTS = {
   //   因为在超长上下文里切阶段 = 一次全量前缀重建（几十万 token 全价），非常贵
   //   设 0 表示关闭闸门
   contextGuardThreshold: 100000,
+  // 【修改这里】★ 迟滞：随口提到的关键词要连续几次指向同一阶段才真的切（1 = 不迟滞）
+  //   默认 2，用来挡住"在 Unity 代码任务里顺嘴提了一句界面"这种误切换
+  switchConfirmations: 2,
+  // 【修改这里】★ 冷却：刚切过一次之后，多少毫秒内不再自动切换（0 = 关闭）
+  switchCooldownMs: 120000,
   // 【修改这里】演示/调试用：强制假装当前模型是这个名字（用来现场演示降级保护）
   //   例：simulateModel: deepseek-v4-pro  → 立刻触发降级警告，且不花一分钱
   simulateModel: '',
@@ -246,6 +251,14 @@ export function normalizeConfig(raw = {}) {
       Number.isFinite(Number(src.contextGuardThreshold)) && Number(src.contextGuardThreshold) >= 0
         ? Math.trunc(Number(src.contextGuardThreshold))
         : CONFIG_DEFAULTS.contextGuardThreshold,
+    switchConfirmations:
+      Number.isFinite(Number(src.switchConfirmations)) && Number(src.switchConfirmations) >= 1
+        ? Math.trunc(Number(src.switchConfirmations))
+        : CONFIG_DEFAULTS.switchConfirmations,
+    switchCooldownMs:
+      Number.isFinite(Number(src.switchCooldownMs)) && Number(src.switchCooldownMs) >= 0
+        ? Math.trunc(Number(src.switchCooldownMs))
+        : CONFIG_DEFAULTS.switchCooldownMs,
     simulateModel: typeof src.simulateModel === 'string' ? src.simulateModel.trim() : '',
     guardEnabled: src.guardEnabled !== false,
     probeEnabled: src.probeEnabled !== false,
@@ -349,6 +362,14 @@ export function apply(ctx, config = {}) {
   const blockedWarned = new Set()
   // 最近一次被拦下的切换（route_status 里展示，方便排查"为什么阶段没变"）
   let lastBlockedSwitch = null
+  // 迟滞仲裁器：抑制"顺嘴提一句就切阶段"的抖动
+  const switchArbiter = createSwitchArbiter({
+    confirmations: cfg.switchConfirmations,
+    cooldownMs: cfg.switchCooldownMs,
+    maxSessions: cfg.maxSessions,
+  })
+  // 最近一次仲裁结果（route_status 里展示）
+  let lastArbiterDecision = null
 
   function rememberAgent(agent) {
     try {
@@ -688,6 +709,9 @@ export function apply(ctx, config = {}) {
           simulateModel: cfg.simulateModel,
           // 最近一次"被闸门拦下的切换"（null 表示没拦过）
           lastBlockedSwitch,
+          // 迟滞/冷却状态：为什么刚才那句关键词没让阶段变
+          switchArbiter: switchArbiter.snapshot(key),
+          lastArbiterDecision,
           enforceByRestrict: cfg.enforceByRestrict,
           // 【降级状态】开源给别人的时候，这两个字段就是"为什么它没生效"的答案
           degraded: !guard.safe,
@@ -722,6 +746,8 @@ export function apply(ctx, config = {}) {
         const key = keyOf(exec)
         const before = state.get(key)
         state.reset(key)
+        switchArbiter.reset(key)
+        lastArbiterDecision = null
         lastLintHit = ''
         const restriction = refreshRestriction(key, exec && exec.agent)
         return {
@@ -859,30 +885,45 @@ export function apply(ctx, config = {}) {
       const text = textOfMessage(payload && payload.message)
       const threshold = cfg.contextGuardThreshold
       const contextTokens = promptTokensBySession.get(key) || 0
+      const detected = detectStage(text, cfg.stages, cfg.stageOrder)
+      const current = state.get(key).stage
 
-      if (threshold > 0 && contextTokens > threshold) {
-        const detected = detectStage(text, cfg.stages, cfg.stageOrder)
-        const current = state.get(key).stage
-        if (detected && detected !== current) {
-          // 只记账、不切换：保持当前阶段，避免又一次全量重建
-          lastBlockedSwitch = {
-            at: Date.now(),
-            by: 'keyword',
-            from: current,
-            to: detected,
-            contextTokens,
-            threshold,
-          }
-          if (!blockedWarned.has(key)) {
-            blockedWarned.add(key)
-            console.warn(
-              `[minimal-router] 已阻止一次"关键词自动切阶段"（${current} → ${detected}）：` +
-                `当前会话 ${contextTokens} token 超过安全阈值 ${threshold}，切了会全量重建缓存。` +
-                `要强制切换请用 route_stage({"stage":"${detected}","force":true})，或开新会话。`,
-            )
-          }
+      // ---- 闸门 1：上下文过大时，任何"会改工具表"的切换都要拦 ----
+      if (threshold > 0 && contextTokens > threshold && detected && detected !== current) {
+        // 只记账、不切换：保持当前阶段，避免又一次全量重建
+        lastBlockedSwitch = {
+          at: Date.now(),
+          by: 'keyword',
+          from: current,
+          to: detected,
+          contextTokens,
+          threshold,
+        }
+        if (!blockedWarned.has(key)) {
+          blockedWarned.add(key)
+          console.warn(
+            `[minimal-router] 已阻止一次"关键词自动切阶段"（${current} → ${detected}）：` +
+              `当前会话 ${contextTokens} token 超过安全阈值 ${threshold}，切了会全量重建缓存。` +
+              `要强制切换请用 route_stage({"stage":"${detected}","force":true})，或开新会话。`,
+          )
+        }
+        return
+      }
+
+      // ---- 闸门 2：迟滞 + 冷却（抑制"顺嘴提一句就切"的抖动）----
+      if (detected && detected !== current) {
+        const decision = switchArbiter.decide({ key, detected, explicit: isExplicitSwitch(text) })
+        if (!decision.switch) {
+          // 不切：传空文本让状态机走"粘住"分支（保持当前阶段），只把信号记账
+          state.onUserMessage(key, '')
+          lastArbiterDecision = { at: Date.now(), key, from: current, to: detected, ...decision }
           return
         }
+        lastArbiterDecision = { at: Date.now(), key, from: current, to: detected, ...decision }
+        state.onUserMessage(key, text)
+        switchArbiter.noteSwitched({ key })
+        refreshRestriction(key, payload && payload.agent)
+        return
       }
 
       state.onUserMessage(key, text)

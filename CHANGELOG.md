@@ -3,6 +3,38 @@
 All notable changes to `dsh-minimal-router`.
 Format: [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/).
 
+## [1.12.0] — 2026-10-31
+
+覆盖率从"不知道"变成"**90.32% 行覆盖，CI 守住 85%**"——而且是用 Node 内置的 V8 coverage 算的，
+**没有装 c8 / istanbul**（继续零依赖）。
+
+### Added
+
+- **`scripts/coverage.mjs`**：零依赖行覆盖率。设 `NODE_V8_COVERAGE` 跑 6 个套件，
+  自己把「偏移区间 + 执行次数」映射回行号。支持 `--json` 和 `--min <阈值>`（CI 用）。
+- **`test/instrument.test.mjs`（28 项）**：专测"量尺子本身"。
+  覆盖率统计暴露出本项目最讽刺的一点——**所有对外数字的来源覆盖率最低**：
+  `probe-core` 30%、`probe-store` 38%、`guard` 50%。
+  现在这几个模块分别到了 **94.6% / 83.6% / 86.8%**。
+  覆盖的契约包括：`fnv1a` 稳定性、`safeStringify` 永不抛、`describeRequest` 的 prefixSig、
+  `makeRecord` 不产生 `undefined` 字段、`summarize` 不产生 NaN、`wrapStream` 原样透传且不吞异常、
+  存储的坏行跳过与轮转、熔断的阈值/清零/会话隔离/逃生门。
+- CI 新增 `coverage` job（ubuntu，阈值 85%）；发版门禁也加上了它。
+
+### 过程中自己犯的两个错（都写在代码注释里）
+
+1. **单进程内用并集 → 假的 100%**：V8 的区间是**嵌套有序**的，顶层"整个文件 count=1"会把
+   未执行分支全染成已覆盖。必须"后者覆盖前者"。
+2. **跨进程也用覆盖 → 假的 35%**：同一文件被多个测试进程加载，各覆盖一部分，
+   最后处理的进程（覆盖最少）把前面的抹掉了。必须**跨进程取并集**。
+
+**两层语义必须分开**，混用在两个方向上都会给出错误数字。
+
+### 现状
+
+**277 项测试**（router 177 + guard 21 + probe 31 + fuzz 12 + instrument 28 + install-elsewhere 8），
+行覆盖率 **90.32%**（3649/4040）。
+
 ## [1.11.0] — 2026-10-31
 
 「只在别人机器上才炸」这一类问题的系统性收口。每一项都有测试或体检覆盖，并挂进了 CI。

@@ -1,4 +1,4 @@
-# dsh-minimal-router · v1.11.0
+# dsh-minimal-router · v1.12.0
 
 [![Tests](https://github.com/qwq1223211/dsh-minimal-router/actions/workflows/test.yml/badge.svg)](https://github.com/qwq1223211/dsh-minimal-router/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
@@ -79,6 +79,11 @@ DSH sends **every** installed plugin's tool schemas on **every** request. With a
 This plugin groups tools by name, decides which group the current task needs, and (optionally) **physically removes** the rest from the request — then puts the routing hint on the **tail** of the context instead of the head, so the prefix stays cacheable.
 
 ## Numbers (same machine, same model, measured with `dsh-cache-probe`)
+
+> **Quality gate**: 277 tests (router 177 + guard 21 + probe 31 + fuzz 12 + instrument 28 +
+> install-elsewhere 8), **90.32% line coverage** (3649/4040, Node built-in V8 coverage, zero dependencies),
+> plus a repo audit on every push that checks imports, entry points, `files` coverage, `engines.dsh` and
+> writable paths. No test framework, no bundler, no linter package — only `node:`.
 
 | Metric | Before (`auto`) | After (`core` stage) |
 |---|---|---|

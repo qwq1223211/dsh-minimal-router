@@ -1,4 +1,4 @@
-# 极简路由（dsh-minimal-router）· v1.11.0 · 小白版说明
+# 极简路由（dsh-minimal-router）· v1.12.0 · 小白版说明
 
 [![Tests](https://github.com/qwq1223211/dsh-minimal-router/actions/workflows/test.yml/badge.svg)](https://github.com/qwq1223211/dsh-minimal-router/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
@@ -526,4 +526,5 @@ prefixSig      : 9515b76a    ← 前缀指纹（变了就说明缓存要重建�
 | 切换阶段的一次性代价（小会话） | 约 3,205 token |
 | 切换阶段的一次性代价（**50 万 token 的大会话**） | **约 512,000 token 全价** ⚠️ |
 | 缓存命中率 | 99.16% ~ 99.9% |
-| 自测 | **214 项**（router 162 + guard 21 + probe 31），三平台全绿 |
+| 自测 | **277 项**（router 177 + guard 21 + probe 31 + fuzz 12 + instrument 28 + install-elsewhere 8），三平台全绿 |
+| 覆盖率 | **90.32% 行覆盖**（3649/4040，Node 内置 V8 coverage，零依赖） |

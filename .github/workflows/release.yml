@@ -37,6 +37,9 @@ jobs:
       - name: 依赖与入口体检
         run: node scripts/audit-deps.mjs
 
+      - name: 行覆盖率（阈值 85%）
+        run: node scripts/coverage.mjs --min 85
+
       # 三处版本号必须一致（package.json / 三个 README / CHANGELOG）。
       # v1.3.0 那次就是这里没校验，README 标题停在旧版本。
       - name: 校验版本号一致

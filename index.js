@@ -1088,7 +1088,8 @@ export function apply(ctx, config = {}) {
         pendingSuggestion: feedback.getSuggestion(key),
         denyRecovery: feedback.summary(key),
         // 空转工具画像：哪些工具从装上到现在一次都没被调用过（→ 那些插件可以卸）
-        toolUsage,
+        // 【不含 byTag】byTag 只给认领判据用；写进对外输出会让 route_status 多出几十条（实测 +41 条）
+        toolUsage: toolUsage && (({ byTag: _byTag, ...publicPart }) => publicPart)(toolUsage),
           lastArbiterDecision,
           // 任务驱动的临时收窄（route_use）
           dynamicGroups: dynamicGrants.get(key) ? [...dynamicGrants.get(key).groups] : [],

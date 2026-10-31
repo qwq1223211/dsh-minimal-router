@@ -3,6 +3,40 @@
 All notable changes to `dsh-minimal-router`.
 Format: [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/).
 
+## [1.19.5] — 2026-10-31
+
+**真机验收抓到的自违规修复。** v1.19.4 的施工单里写着"byTag 不写入 route_status 输出"，
+而实际实现把整个 toolUsage 对象直接抛了出去，byTag 跟着漏了 —— 实测多出 **41 条**、约 1.5KB。
+
+### Fixed
+
+index.js 的 toolUsage 输出改为**剔除 byTag** 的公开视图：
+
+    toolUsage: toolUsage && (({ byTag: _byTag, ...publicPart }) => publicPart)(toolUsage),
+
+- byTag 仍保留在局部常量里，供 findUnclaimed() 计算 used/total/verdict
+- 对外输出只保留原有字段（trackedTools / unusedTools / unusedGroups / topUsed / advice）
+- index.js 仍是 **1197 行**（净 0 行）
+- usageTracking 关闭时 toolUsage 为 null，该表达式同样返回 null
+
+### 真机验收数据（v1.19.4 首次上线时取得）
+
+| 标签 | bytes | used/total | verdict |
+|---|---|---|---|
+| **ego** | **28,503**（最大） | **2 / 35** | **do-not-claim** |
+| comfyui | 8,661 | 1 / 4 | do-not-claim |
+| route | 3,398 | 2 / 7 | do-not-claim |
+| **screen** | 2,978 | 0 / 3 | **claim-candidate** |
+| task | 2,026 | 3 / 3 | do-not-claim |
+| sticker | 1,200 | 0 / 3 | claim-candidate |
+
+**体积最大的 ego 恰恰是"用过的"**——这正是认领判据存在的意义：按"谁最大就认领谁"的老思路，
+会一刀砍掉正在用的工具。task（task-guard 自己的 3 个工具）全部用过，同样一个都不能裁。
+
+同时确认 route_status.unionEnabled === false 在真机可见（v1.19.2 的默认关闭已生效）。
+
+**全量 370 项通过。**
+
 ## [1.19.4] — 2026-10-31
 
 **把"认领判据"从一句价值观变成一张能算的表。** 默认动作是**不认领**。

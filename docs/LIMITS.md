@@ -45,10 +45,13 @@ profile 里也没有本地模型插件。**DSH 自己不会下载模型**；要�
 必须返回：{ stage: string, confidence: number }
 三保险：
   1. 规则优先   —— 关键词命中就不问模型
-  2. 置信度门槛 —— confidence < 阈值不采纳
+  2. 置信度门槛 —— confidence >= 0.75 才采纳（初始默认值，可配置 localMinConfidence）
   3. Fail-open  —— 超时/异常/低置信 → 回退 auto（全开放），绝不误杀
 记录：{ provider:'local'|'keyword', latencyMs, model } 写入 activity JSONL，供事后比较
 ```
+
+> `0.75` 是**初始值不是定论**：它是"宁可多回退、也不乱切"的保守起点，
+> 未来按 `activity` 里 local vs keyword 的准确率对比来调；调整时必须同步更新这段文档。
 
 **启用条件（可观测，不是拍脑袋）**
 
@@ -65,9 +68,22 @@ profile 里也没有本地模型插件。**DSH 自己不会下载模型**；要�
 - 任何**没被阶段表认领**的标签，工具**永远放行**：`decideOutOfStage` 对它是 allow
 - 它**永远不进 deny 列表**，也就永远不会被物理摘掉
 - 唯一例外：某个阶段显式写 `strict: true` —— 这是**人的显式选择**，不是默认行为
+- **并集不继承 `strict`**：`synthesizeStage()` 合成的阶段没有 `strict` 字段，
+  所以即使某个子阶段写了 `strict: true`，开启并集（`python-code+document-write`）也**不会**误杀未认领标签。
+  这是**设计意图，不是实现巧合**——若未来有人给合成阶段加 `strict` 字段，
+  `test/infra.test.mjs` 里那两条"strict 不被并集继承"会立刻变红。
 - 目的：你以后装的第三方插件、以及你新写的插件，不会被路由器"因为不认识"而误杀
 
-这条有 4 项测试钉死（`test/infra.test.mjs`）。
+### `unclaimedTags` 里的 `bytes` 怎么读
+
+`route_status` 会列出未认领标签及其体积。这个 `bytes` 是**展示值**：
+
+- 它等于 `JSON.stringify({name, description, parameters}).length` 的累加，**精确到字节**
+- 但**与模型实际看到的 token 不是 1:1**（本项目实测约 4 字节/token）
+- 所以它只用于**量级判断**（"这堆没管的东西占了多少"），**不参与任何裁剪决策**
+- 只在调用 `route_status` 时计算一次，**不影响每轮请求**
+
+这条有 8 项测试钉死（`test/infra.test.mjs`，含 strict 继承与探针白名单）。
 
 ---
 

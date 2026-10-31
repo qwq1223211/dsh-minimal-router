@@ -133,9 +133,14 @@ function codeLineCount(file) {
 }
 const indexCodeLines = codeLineCount(INDEX)
 if (indexCodeLines > 1200) {
-  problems.push(`index.js 有 ${indexCodeLines} 行代码（不含注释），超过 1200 行的守卫线——该拆了`)
+  // 超线时不要输出负数余量（1200 - N 会是负的），直接说超了多少
+  problems.push(
+    `index.js 有 ${indexCodeLines} 行代码（不含注释），已超 1200 行守卫线 ${indexCodeLines - 1200} 行——该拆了（见 docs/ROADMAP.md 的三段拆分）`,
+  )
 } else if (indexCodeLines > 1100) {
-  warnings.push(`index.js 有 ${indexCodeLines} 行代码（不含注释），接近 1200 行守卫线`)
+  warnings.push(
+    `index.js 有 ${indexCodeLines} 行代码（不含注释），距 1200 行守卫线还剩 ${1200 - indexCodeLines} 行`,
+  )
 }
 
 // ---------------------------------------------------------------------------

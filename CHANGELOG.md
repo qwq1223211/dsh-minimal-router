@@ -3,6 +3,39 @@
 All notable changes to `dsh-minimal-router`.
 Format: [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/).
 
+## [1.19.3] — 2026-10-31
+
+**加固版，没有新功能**：把三条"口头约定"变成红绿信号。改动全部在 `test/`、`docs/`、`scripts/lint.mjs`，
+**`index.js` 一行没动（仍 1198）**。
+
+### Added —— 6 条新断言（`test/infra.test.mjs` 8 → 15 条）
+
+1. **模块默认关闭**：用 `import('../lib/union.js?fresh=...')` 拿全新实例断言，
+   不依赖"测试按声明顺序执行"。旧写法在有人给测试文件加 `concurrency` 后会静默失效。
+2. **`scoreText` 等高夹具**（主断言）：两个画像关键词完全相同 → 分数相等 → margin 0；
+   关闭态必须返回 `null`（放弃路径保留），开启态才给两个阶段。该夹具对权重调整不敏感。
+3. **`scoreText` 回归样例**（辅断言）：实测 score 21.793 / second 14.075 / margin 0.354，
+   关闭态 → 单阶段 `beta-stage`，开启态 → 两阶段。注释写明"权重变了要重新采样"。
+4. **`detectStage` 双模式对照**：同一句关闭态 `python-code`、开启态 `document-write+python-code`。
+5. **`strict` 不被并集继承**（两条）：合成阶段没有 `strict` 字段；
+   子阶段标 `strict:true` 也不外溢到并集——未认领标签仍放行。
+   （测试里必须用 `withUnion()` 包一层，否则普通展开会丢 Proxy 导致"假绿"。）
+6. **探针记录键白名单完全一致**（20 键）：以后谁往记录里加字段（尤其归因字段）这条立刻红，
+   逼迫改字段的人同步白名单与 `docs/LIMITS.md`。
+
+### Docs
+
+- `docs/LIMITS.md`：补"并集不继承 strict 是设计意图不是巧合"、"`bytes` 是展示值（与 token 非 1:1、不参与裁剪）"、
+  本地分类器置信度初始默认 `0.75`（可配 `localMinConfidence`）
+- 新增 `docs/ROADMAP.md`：`index.js` 三段拆分（触发条件 >1150 行或需净增 >5 行）、
+  并集去留（<10 次/周 → 先 `@deprecated` 一版再删）、探针 `stage` 接线的先后顺序
+
+### Changed —— lint 文案
+
+- 超线时输出"已超 N 行"，未超时输出"还剩 N 行"，不再出现负数余量；阈值不变（>1100 警告 / >1200 失败）
+
+**全量 363 项通过**（356 → 363）。
+
 ## [1.19.2] — 2026-10-31
 
 > This is a personal infrastructure release. Experimental unions are disabled by default. Designed for extensibility.

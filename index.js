@@ -1005,6 +1005,8 @@ export function apply(ctx, config = {}) {
           // 拿不到工具清单就空着
         }
         const denyCount = (restrictions.get(key) || {}).denyCount || 0
+        // 【认领判据】用量画像提前算一次：unclaimedTags 与 toolUsage 两处共用同一份
+        const toolUsage = cfg.usageTracking ? usage.summarize(registeredNames, (n) => tagOf(n, cfg.coreTools)) : null
         return {
           stage: snapshot.stage,
           by: snapshot.by,
@@ -1033,7 +1035,7 @@ export function apply(ctx, config = {}) {
           // [已删除] advertisedAfterRestrict：三轮 A/B 实测证明它报 138 而实际是 72，会误导人。
           tagCounts: catalog.tags,
           // 还没被任何阶段管的工具组（新装的插件会出现在这里；它们目前永远放行）
-          unclaimedTags: findUnclaimed({ tagCounts: catalog.tags, claimed, tagBytes }),
+          unclaimedTags: findUnclaimed({ tagCounts: catalog.tags, claimed, tagBytes, usage: toolUsage }),
           // 阶段表和环境对不上？——别人的部署最容易撞的坑：
           // 内置表认领的是 unity/art/...，而这台机器只有 snowluma 之类的标签，
           // 结果 deny 列表永远是空，看起来"装了但一点没省"，而且完全没有任何报错。
@@ -1086,9 +1088,7 @@ export function apply(ctx, config = {}) {
         pendingSuggestion: feedback.getSuggestion(key),
         denyRecovery: feedback.summary(key),
         // 空转工具画像：哪些工具从装上到现在一次都没被调用过（→ 那些插件可以卸）
-        toolUsage: cfg.usageTracking
-          ? usage.summarize(registeredNames, (n) => tagOf(n, cfg.coreTools))
-          : null,
+        toolUsage,
           lastArbiterDecision,
           // 任务驱动的临时收窄（route_use）
           dynamicGroups: dynamicGrants.get(key) ? [...dynamicGrants.get(key).groups] : [],

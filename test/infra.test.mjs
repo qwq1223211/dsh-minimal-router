@@ -10,8 +10,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { decideOutOfStage, computeDenyList, tagBytesOf, claimedTags } from '../lib/classify.js'
+import { decideOutOfStage, computeDenyList, tagBytesOf, claimedTags, tagOf } from '../lib/classify.js'
 import { findUnclaimed } from '../lib/stages-config.js'
+import { createUsageTracker } from '../lib/usage.js'
 import { DEFAULT_STAGES, STAGE_ORDER } from '../lib/stages-default.js'
 import { detectStage } from '../lib/stage.js'
 import { setUnionEnabled, unionEnabled, synthesizeStage, withUnion } from '../lib/union.js'
@@ -270,4 +271,124 @@ test('探针记录：键集合与白名单完全一致（新增字段必须同�
     [...RECORD_WHITELIST].sort(),
     '探针记录的键集合变了：请先确认新字段不越权（不追责插件），再同步白名单与 docs/LIMITS.md',
   )
+})
+
+// ---------------------------------------------------------------------------
+// 五、认领判据（docs/CLAIMING.md）：代码只给数据，默认不认领
+// ---------------------------------------------------------------------------
+
+/** 造一份 findUnclaimed 的输入 */
+function claimInput(usageByTag) {
+  return {
+    tagCounts: { futureplug: 2, usedtag: 1, unknowntag: 1 },
+    claimed: new Set(),
+    tagBytes: { futureplug: 900, usedtag: 500, unknowntag: 100 },
+    usage: usageByTag ? { byTag: usageByTag } : undefined,
+  }
+}
+
+test('认领判据：从没被调用过 → claim-candidate（仍是"候选"，不是"该认领"）', () => {
+  const list = findUnclaimed(claimInput([{ tag: 'futureplug', total: 2, unused: 2, used: 0 }]))
+  const row = list.find((x) => x.tag === 'futureplug')
+  assert.equal(row.verdict, 'claim-candidate')
+  assert.equal(row.used, 0)
+  assert.equal(row.total, 2)
+  assert.ok(row.bytes > 0, 'bytes 必须保留，判据要算收益')
+})
+
+test('认领判据：有工具真的被调用过 → do-not-claim（最重要的那条）', () => {
+  const list = findUnclaimed(claimInput([{ tag: 'usedtag', total: 1, unused: 0, used: 1 }]))
+  const row = list.find((x) => x.tag === 'usedtag')
+  assert.equal(row.verdict, 'do-not-claim', '在用的工具绝不能被建议裁掉')
+  assert.equal(row.used, 1)
+})
+
+test('认领判据：查不到用量 → no-data，且 used 必须是 null 不是 undefined', () => {
+  const list = findUnclaimed(claimInput([{ tag: 'futureplug', total: 2, unused: 2, used: 0 }]))
+  const row = list.find((x) => x.tag === 'unknowntag')
+  assert.equal(row.verdict, 'no-data')
+  assert.equal(row.used, null, 'null 而不是 undefined：0 会被误读成"从没调用过"')
+  assert.equal(row.total, null)
+  // 完全不传 usage 时，所有行都该是 no-data（安全方向）
+  const noUsage = findUnclaimed({ tagCounts: { a: 1 }, claimed: new Set(), tagBytes: { a: 10 } })
+  assert.equal(noUsage[0].verdict, 'no-data')
+})
+
+test('认领判据：verdict 不影响排序（仍按 bytes 降序）', () => {
+  const list = findUnclaimed({
+    tagCounts: { big: 1, small: 1 },
+    claimed: new Set(),
+    tagBytes: { big: 9000, small: 100 },
+    // 故意让小的那个是 candidate、大的那个是 do-not-claim
+    usage: { byTag: [{ tag: 'big', total: 1, unused: 0, used: 1 }, { tag: 'small', total: 1, unused: 1, used: 0 }] },
+  })
+  assert.equal(list[0].tag, 'big', '排序只看体积，不看 verdict')
+  assert.equal(list[0].verdict, 'do-not-claim')
+})
+
+test('usage.summarize：byTag 覆盖全部注册标签，且 unusedGroups 语义未变', () => {
+  const tracker = createUsageTracker({ file: '' })
+  tracker.record('futureplug_a') // 只调一个，另一个从没调过
+  const snap = tracker.summarize(['futureplug_a', 'futureplug_b'], (n) => tagOf(n, []))
+
+  assert.ok(Array.isArray(snap.byTag), 'summarize 应导出 byTag')
+  const row = snap.byTag.find((t) => t.tag === 'futureplug')
+  assert.ok(row, 'byTag 必须包含全量标签（不只是有未调用的）')
+  assert.equal(row.total, 2)
+  assert.equal(row.used, 1)
+  assert.equal(row.unused, 1)
+  // 旧字段语义不变
+  assert.equal(snap.unusedTools, 1)
+  assert.ok(Array.isArray(snap.unusedGroups))
+  assert.ok(snap.unusedGroups.some((g) => g.tag === 'futureplug' && g.unused === 1))
+})
+
+test('usageTracking 关闭（usage = null）：每项都落 no-data，且 used 是 null', () => {
+  // 钉死 cfg.usageTracking=false 的分支：toolUsage 为 null，findUnclaimed 不能假装知道用量
+  const list = findUnclaimed({
+    tagCounts: { futureplug: 2, another: 1 },
+    claimed: new Set(),
+    tagBytes: { futureplug: 900, another: 100 },
+    usage: null,
+  })
+  assert.ok(list.length >= 2)
+  for (const row of list) {
+    assert.equal(row.verdict, 'no-data', `${row.tag} 在没有用量数据时必须落 no-data`)
+    assert.equal(row.used, null, `${row.tag} 的 used 必须是 null（0 会被误读成"从没调用过"）`)
+    assert.equal(row.total, null)
+    assert.ok(row.bytes > 0, 'bytes 与用量无关，必须照常给出')
+  }
+})
+
+test('端到端口径：真实 summarize → 该标签 used=1 → findUnclaimed 判为 do-not-claim', () => {
+  // 这条钉的是"统计口径"与"认领判据"之间的一致性：
+  // 走真实的 tracker.record + summarize，而不是手搓一个 usage 对象。
+  const names = ['futureplug_a', 'futureplug_b', 'ego_navigate']
+  const tracker = createUsageTracker({ file: '' })
+  tracker.record('futureplug_a')
+
+  const snap = tracker.summarize(names, (n) => tagOf(n, []))
+  const list = findUnclaimed({
+    tagCounts: Object.fromEntries(snap.byTag.map((t) => [t.tag, t.total])),
+    claimed: new Set(), // 全部未认领
+    tagBytes: Object.fromEntries(snap.byTag.map((t) => [t.tag, 100])),
+    usage: snap,
+  })
+
+  const fp = list.find((r) => r.tag === 'futureplug')
+  assert.ok(fp, 'futureplug 应该在未认领列表里')
+  assert.equal(fp.used, 1, '真实统计口径下 futureplug 被调用过 1 次')
+  assert.equal(fp.total, 2)
+  assert.equal(fp.verdict, 'do-not-claim', '用过就不认领——这是判据的核心')
+
+  const ego = list.find((r) => r.tag === 'ego')
+  assert.ok(ego, 'ego 也应该是未认领的')
+  assert.equal(ego.used, 0)
+  assert.equal(ego.verdict, 'claim-candidate', '从没调用过 → 候选（但不是结论）')
+
+  // 口径一致性：unclaimedTags 里出现的每个标签，byTag 都能查到（否则会误落 no-data）
+  const byTagTags = new Set(snap.byTag.map((t) => t.tag))
+  for (const row of list) {
+    assert.ok(byTagTags.has(row.tag), `${row.tag} 不在 byTag 里，会造成假 no-data`)
+  }
 })

@@ -3,6 +3,55 @@
 All notable changes to `dsh-minimal-router`.
 Format: [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/).
 
+## [1.19.4] — 2026-10-31
+
+**把"认领判据"从一句价值观变成一张能算的表。** 默认动作是**不认领**。
+
+### Added —— `unclaimedTags` 多三列：`used` / `total` / `verdict`
+
+`route_status.unclaimedTags` 现在每项是 `{ tag, count, bytes, used, total, verdict }`：
+
+| verdict | 含义 | 建议 |
+|---|---|---|
+| `claim-candidate` | 该标签的工具**一个都没被调用过** | 候选，仍需人判断领域专用性 |
+| `do-not-claim` | **有工具真的被调用过** | 绝不认领（会裁掉在用的） |
+| `no-data` | 用量画像里查不到 | 证据不足，不动 |
+
+数据来源：`lib/usage.js` 的 `summarize()` 新增全量 `byTag`（不截断、不过滤）；
+`lib/stages-config.js` 的 `findUnclaimed()` 合成三列并给判定。
+`verdict` **不驱动任何裁剪行为**——它只是给人看的一列。
+
+### Added —— `docs/CLAIMING.md`
+
+把评审里那段判断落成文件：两种账本（声明 vs 调用）、三条准入、三条拒入、
+一个算式（`每轮省 ≈ bytes × 0.25` / `回本 = 上下文 / 每轮省`）、以及适用域
+（短会话几乎必然亏；只有长会话 + 巨型工具表才值得）。
+
+### Verified before coding（开工前三件核实）
+
+1. **`byTag` 的标签集合覆盖 `unclaimedTags`**：用真实 tracker 跑一遍，未认领列表里每个标签都能在 `byTag` 查到
+   （`byTag` 额外含 `core` 与被认领标签，那是 `findUnclaimed` 主动跳过的，不是缺口）
+2. **`summarize()` 无副作用**：函数体内无 `writeFile` / `appendFile` / `flush` / `dirty` 赋值 → `toolUsage` 上提安全
+3. **`byTag` 遍历全部 `names`、无过滤**：实测覆盖 `core/ego/futureplug/unity`，过滤只发生在 `unusedGroups`
+
+### Changed —— `index.js` 1198 → **1197**（净减 1 行）
+
+把 `toolUsage` 上提为局部常量，`unclaimedTags` 与 `toolUsage` 共用同一份画像，
+原来那 3 行内联三元压成 1 行 + 1 行引用。仍在 1200 守卫线内。
+
+### Tests
+
+`test/infra.test.mjs` 15 → **22 条**，新增 5 条钉死认领判据，外加 2 条本轮校准补的：
+`claim-candidate` / `do-not-claim`（最重要）/ `no-data`（`used` 必须是 `null` 不是 `undefined`）/
+排序不受 verdict 影响 / `byTag` 覆盖全量且 `unusedGroups` 语义未变。
+
+补的 2 条：
+- **`usage = null`（usageTracking 关闭）** → 每项都落 `no-data` 且 `used === null`，`bytes` 照常给出
+- **端到端口径**：走真实 `tracker.record()` + `summarize()` → 该标签 `used === 1` → `findUnclaimed` 判 `do-not-claim`，
+  并断言"未认领列表里每个标签都能在 `byTag` 里查到"（否则会误落假 `no-data`）
+
+**全量 370 项通过。**
+
 ## [1.19.3] — 2026-10-31
 
 **加固版，没有新功能**：把三条"口头约定"变成红绿信号。改动全部在 `test/`、`docs/`、`scripts/lint.mjs`，

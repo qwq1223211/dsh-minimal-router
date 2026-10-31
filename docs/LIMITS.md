@@ -67,6 +67,8 @@ profile 里也没有本地模型插件。**DSH 自己不会下载模型**；要�
 
 - 任何**没被阶段表认领**的标签，工具**永远放行**：`decideOutOfStage` 对它是 allow
 - 它**永远不进 deny 列表**，也就永远不会被物理摘掉
+- **"认领"不是默认动作**：判据见 [`CLAIMING.md`](./CLAIMING.md)——只有"极窄 + 从未被调用 + 体积可观"的标签才值得认领；
+  `route_status.unclaimedTags` 里的 `verdict` 三态（`claim-candidate` / `do-not-claim` / `no-data`）就是给这个判断用的
 - 唯一例外：某个阶段显式写 `strict: true` —— 这是**人的显式选择**，不是默认行为
 - **并集不继承 `strict`**：`synthesizeStage()` 合成的阶段没有 `strict` 字段，
   所以即使某个子阶段写了 `strict: true`，开启并集（`python-code+document-write`）也**不会**误杀未认领标签。

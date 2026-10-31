@@ -3,6 +3,48 @@
 All notable changes to `dsh-minimal-router`.
 Format: [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/).
 
+## [1.19.0] — 2026-10-31
+
+**多领域并集**：跨领域任务不再"判不出来就什么都不做"。
+
+### 起因
+
+意图判断器（`lib/intent.js`）在两个阶段分数接近时 `margin` 不够，直接 `return null`。
+于是"帮我写个 Python 脚本爬取网页，然后整理成一份周报文档"这种句子**一个领域都认不出来**，
+router 停在原地，两边的工具都没放开。
+
+### 改了什么
+
+1. `scoreText` 现在可以返回 1~2 个阶段：
+   ```
+   stage:  "document-write+python-code"
+   stages: ["document-write", "python-code"]
+   reason: "union-strong-second"
+   ```
+2. **判据从"只看相对差距"改成"看绝对强度"**：
+   目标句里文档侧 22.7 分、代码侧 15.4 分，margin 32%（超过 0.28 阈值）——
+   老规则会判成"单领域"，但 15.4 分根本不是噪音。
+   新规则：**第二名本身够强（≥ minScore×3）且第一名没压倒它（margin < 0.55）→ 并集**。
+3. `lib/union.js`：用 **Proxy** 让 `stages["a+b"]` 能现场合成并集定义。
+   `index.js` 里所有阶段访问本来就是 `stages[name]` 下标读取（含 classify.js / prompt.js），
+   所以**一个 Proxy 全部生效，index.js 一行没动（仍是 1198 行）**。
+   `Object.keys` 仍只列真实阶段，合成名不会漏进配置与状态面板。
+4. 新增两个**非 Unity** 阶段 `python-code` / `document-write`，allow 里同时写
+   理想标签（python/office，本机不存在但无害）与真实标签（terminal/study），
+   保证并集在真机上**看得见**而不是空转。
+
+### 测试
+
+新增 `test/union.test.mjs`（17 项），刻意全部使用非 Unity 场景：
+
+- 并集名的解析/合成/去重/缓存稳定性
+- 目标句 → 同时返回两个阶段
+- 单领域句、Unity UI 句、无关句**均无回归**
+- 状态机接受并集名（不被当成未知阶段拒掉）
+- 越界判定：并集里两边的工具都放行，`unity_*` 仍被拦
+
+**全量 346 项通过**（原 329 项）。
+
 ## [1.18.0] — 2026-10-31
 
 三件"主动的聪明"：不再只是被动响应，而是**自己判断划不划算、该不该开口、拦得对不对**。

@@ -108,3 +108,42 @@ route_status  →  unclaimedTags
 | `lib/classify.js` → `decideOutOfStage()` | 未认领 → 永远放行（与本文档的做法互补） |
 
 **代码只给数据，不给决定**：领域专用性无法可靠自动判断，所以这一列永远留给人。
+
+---
+
+## 七、认领台阶（一次只上一级）
+
+**不做批量认领。** 批量认领 = 把"系统管理"变成"系统性误杀"。规则：
+
+1. 一次只加 **一个** 标签进 `custom_stages.json`
+2. 必须是 `verdict === "claim-candidate"`（`used === 0`）**且**领域极窄
+3. 观察 **一周**，期间注意有没有"工具突然不可用"的抱怨
+4. 一周后再跑 `route_status`，看下一级台阶
+
+### 第一级台阶（2026-10-31 已执行）
+
+| 项 | 值 |
+|---|---|
+| 标签 | `screen` |
+| 工具 | `screen_shot` / `screen_read` / `screen_find`（来自 `dsh-click`，桌面自动化） |
+| 体积 | 2,978 字节（未认领标签里第二大） |
+| 证据 | `used = 0 / total = 3`（从没被调用过） |
+| 为什么选它 | 领域极窄：只有明确要做"截屏/读屏/点鼠标"时才需要，写代码时绝不会想要 |
+| 归属阶段 | 新增 `desktop` 阶段（keywords: 截屏/截图/屏幕/桌面/点击/鼠标/窗口） |
+| 生效方式 | 写在 `~/.dsh/minimal-router/custom_stages.json`，重载插件后生效 |
+| 撤销方式 | 删掉该文件（或删掉 `desktop` 项）→ 关掉再打开插件 |
+
+**实测校验（离线）**：
+
+```
+screen 已认领 → 是
+screen_shot 在 core 阶段 → 裁剪
+screen_shot 在 art 阶段  → 裁剪
+screen_shot 在 desktop 阶段 → 放行
+```
+
+### 下一级台阶的候选（等一周后再定）
+
+按"used=0 且领域窄"筛出来的还有：`sticker`（3 个，表情包）、`meme`（1 个）、`modlens`（1 个，视觉）、`cursor`（1 个，demo）。
+
+**明确不要认领的**：`read`（=`read_document`，读上传文档常被需要）、`ego`/`comfyui`/`plugin`/`app`/`tool`（都有调用记录）。

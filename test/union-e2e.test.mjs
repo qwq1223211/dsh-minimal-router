@@ -16,11 +16,15 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { apply } from '../index.js'
+import { setUnionEnabled } from '../lib/union.js'
 import { detectStage } from '../lib/stage.js'
 import { DEFAULT_STAGES, STAGE_ORDER } from '../lib/stages-default.js'
 
 const SENTENCE = '帮我写个 Python 脚本爬取网页，然后整理成一份周报文档'
 const UNION = 'document-write+python-code'
+
+// 【@experimental】本文件专测并集，模块级先打开；下面 apply() 的配置也会再打开一次
+setUnionEnabled(true)
 
 /** 假 ctx：够 apply() 跑起来，并且 restrict 真的会把工具从 schemas 里摘掉 */
 function makeRuntime(toolNames) {
@@ -142,6 +146,8 @@ test('端到端：一句话走完 inbox → 并集 → route_status 能看到', 
     switchConfirmations: 1,
     switchCooldownMs: 0,
     intentRouting: true,
+    // 【@experimental】并集默认关闭，本用例专测它，必须显式打开
+    unionEnabled: true,
   })
 
   feedAgentCreated(rt)

@@ -31,12 +31,14 @@ import {
   decideOutOfStage,
   computeDenyList,
   suggestStageForTag,
+  tagBytesOf,
 } from './lib/classify.js'
 import { createStageState, textOfMessage, detectStage, isExplicitSwitch, createSwitchArbiter } from './lib/stage.js'
+import { setUnionEnabled } from './lib/union.js'
 import { createIntentDetector } from './lib/intent.js'
 import { createUsageTracker } from './lib/usage.js'
 import { createSignalStore } from './lib/adaptive.js'
-import { STATE_DIR, collectStrings, pickProbeDataFile } from './lib/util.js'
+import { STATE_DIR, collectStrings, pickProbeDataFile, RENDER, toNum } from './lib/util.js'
 import { createActivityLog } from './lib/activity.js'
 import { createFeedback } from './lib/feedback.js'
 
@@ -201,6 +203,11 @@ const CONFIG_DEFAULTS = {
   intentRouting: true,
   intentMinScore: 2.0,
   intentMinMargin: 0.25,
+  // 【修改这里】★ @experimental 多领域并集：默认 false（关闭）
+  //   实测：并集阶段发出的工具声明 ≈ 单阶段的 3 倍（154 工具/134,539 字节 vs 54/46,326），
+  //   对主打"瘦身"的插件来说多数任务是负收益。仅当你要做"复合任务"时显式设为 true。
+  //   关闭时 detectStage / 打分器都不会产出 "a+b"，行为与引入并集前完全一致。
+  unionEnabled: false,
   // 【修改这里】★ 使用画像：记录每个工具被调用过几次，找出"从没用过"的那些
   //   只统计、不卸载；数据写在 ~/.dsh/minimal-router/tool-usage.json
   usageTracking: true,
@@ -223,23 +230,12 @@ const CONFIG_DEFAULTS = {
   probe: {},
 }
 
-const RENDER = {
-  schema: { type: 'object', additionalProperties: true },
-  render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 2) }],
-}
-
 // 【修改这里】短于这个长度的字符串不送去体检。
 // 别设太大：`while(true){}` 只有 13 个字符，设成 20 就会漏掉最短的死循环（实测踩过）。
 const MIN_SCAN_CHARS = 8
 
 /** 兜底空流：只在瀑布里拿不到下游 next 时使用，保证不抛错 */
 async function* emptyStream() {}
-
-/** 数字兜底：NaN / 字符串 / undefined 一律变 0 */
-function toNum(value) {
-  const n = Number(value)
-  return Number.isFinite(n) ? n : 0
-}
 
 /**
  * 观察流里的 usage，同时把 chunk 原样透传。
@@ -361,6 +357,8 @@ export function normalizeConfig(raw = {}) {
       Number.isFinite(Number(src.adaptiveMinShare)) && Number(src.adaptiveMinShare) > 0 && Number(src.adaptiveMinShare) <= 1
         ? Number(src.adaptiveMinShare)
         : CONFIG_DEFAULTS.adaptiveMinShare,
+    // @experimental 多领域并集：默认关闭，只有严格 true 才开
+    unionEnabled: src.unionEnabled === true,
     intentMinScore:
       Number.isFinite(Number(src.intentMinScore)) && Number(src.intentMinScore) >= 0
         ? Number(src.intentMinScore)
@@ -415,6 +413,8 @@ function resolveProbeDataFile(target) {
 
 export function apply(ctx, config = {}) {
   const cfg = normalizeConfig(config)
+  // @experimental 并集开关：必须在任何 detectStage / 打分器被调用之前设置
+  setUnionEnabled(cfg.unionEnabled)
 
   // ------------------------------------------------------------------
   // 阶段表三层合并：内置 → custom_stages.json → cordis.patch.yml 里的 stages
@@ -991,6 +991,8 @@ export function apply(ctx, config = {}) {
         const snapshot = state.get(key)
         let catalog = { tags: {}, total: 0 }
         let registeredNames = []
+        // 标签 → 字节数：给"未认领标签"做体积归因（人类据此决定要不要写 custom_stages.json）
+        let tagBytes = {}
         try {
           // 【注意】ctx.tools.schemas() 返回的是"注册表视图"，**不反映 restrict 限制**
           // （实测：限制生效后 schemas() 依然返回 153 条）。
@@ -998,6 +1000,7 @@ export function apply(ctx, config = {}) {
           const schemas = typeof ctx.tools.schemas === 'function' ? ctx.tools.schemas() : []
           registeredNames = schemas.map((tool) => tool && tool.name).filter(Boolean)
           catalog = buildCatalog(registeredNames, cfg.coreTools)
+          tagBytes = tagBytesOf(schemas, cfg.coreTools)
         } catch {
           // 拿不到工具清单就空着
         }
@@ -1030,7 +1033,7 @@ export function apply(ctx, config = {}) {
           // [已删除] advertisedAfterRestrict：三轮 A/B 实测证明它报 138 而实际是 72，会误导人。
           tagCounts: catalog.tags,
           // 还没被任何阶段管的工具组（新装的插件会出现在这里；它们目前永远放行）
-          unclaimedTags: findUnclaimed({ tagCounts: catalog.tags, claimed }),
+          unclaimedTags: findUnclaimed({ tagCounts: catalog.tags, claimed, tagBytes }),
           // 阶段表和环境对不上？——别人的部署最容易撞的坑：
           // 内置表认领的是 unity/art/...，而这台机器只有 snowluma 之类的标签，
           // 结果 deny 列表永远是空，看起来"装了但一点没省"，而且完全没有任何报错。
@@ -1068,6 +1071,8 @@ export function apply(ctx, config = {}) {
         intentRouting: cfg.intentRouting,
         intentMinScore: cfg.intentMinScore,
         intentMinMargin: cfg.intentMinMargin,
+        // @experimental 多领域并集：默认 false；开了才会出现 "a+b" 这种阶段名
+        unionEnabled: cfg.unionEnabled,
         lastIntent,
         // 自适应阶段：默认关闭；开了之后最近一次判定也在这里
         adaptiveStage: cfg.adaptiveStage,

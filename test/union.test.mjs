@@ -14,9 +14,12 @@ import assert from 'node:assert/strict'
 
 import { DEFAULT_STAGES, STAGE_ORDER } from '../lib/stages-default.js'
 import { createIntentDetector, scoreText, buildProfiles } from '../lib/intent.js'
-import { parseUnion, unionName, synthesizeStage, withUnion } from '../lib/union.js'
+import { parseUnion, unionName, synthesizeStage, withUnion, setUnionEnabled } from '../lib/union.js'
 import { renderHint, HINT_LIMIT } from '../lib/prompt.js'
 import { claimedTags } from '../lib/classify.js'
+
+// 【@experimental】并集默认关闭；本文件专测这个实验特性，所以显式打开
+setUnionEnabled(true)
 
 const CROSS = '帮我写个 Python 脚本爬取网页，然后整理成一份周报文档'
 const detector = createIntentDetector(DEFAULT_STAGES, {})

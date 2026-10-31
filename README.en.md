@@ -1,4 +1,4 @@
-# dsh-minimal-router · v1.19.1
+# dsh-minimal-router · v1.19.2
 
 [![Tests](https://github.com/qwq1223211/dsh-minimal-router/actions/workflows/test.yml/badge.svg)](https://github.com/qwq1223211/dsh-minimal-router/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
@@ -51,6 +51,7 @@ alongside another tool router. [Details](#what-it-does-not-do-avoid-misunderstan
 
 A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) host plugin. No build step, no dependencies.
 
+> `unionEnabled` (multi-domain union) is **@experimental and off by default**; see [docs/LIMITS.md](./docs/LIMITS.md).
 ---
 
 ## Install

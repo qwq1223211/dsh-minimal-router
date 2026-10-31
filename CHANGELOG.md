@@ -3,6 +3,42 @@
 All notable changes to `dsh-minimal-router`.
 Format: [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/).
 
+## [1.19.2] — 2026-10-31
+
+> This is a personal infrastructure release. Experimental unions are disabled by default. Designed for extensibility.
+
+个人基建收尾版：不再为"小白体验"牺牲架构，底线是**支撑后续大量第三方插件与我自己的新插件**。
+
+### Changed —— 并集转 `@experimental`，默认关闭
+
+- 新增配置 `unionEnabled`（默认 **false**），`cordis.patch.yml` 里显式写出并注明原因
+- 关闭时 `detectStage` 与打分器**都不产出** `"a+b"`，行为与引入并集之前完全一致
+- `route_status` 新增 `unionEnabled` 字段，一眼可见当前是否启用
+- 实测代价（写进 `docs/LIMITS.md`）：并集 154 工具 / 134,539 字节 vs 单阶段 54 / 46,326（**约 3 倍**）
+
+### Added —— 未认领标签的体积归因
+
+- `lib/classify.js` 新增 `tagBytesOf(schemas, coreTools)`：按标签累加工具声明字节
+- `findUnclaimed` 输出增加 `bytes`（无数据填 **0**，绝不 undefined），并按体积降序
+- `route_status` 的 `unclaimedTags` 现在带体积 —— 由**人**决定要不要写 `custom_stages.json`，插件不擅自裁剪
+
+### Hardened —— 未认领即放行（基建底线）
+
+- 新增 `test/infra.test.mjs`（8 项）：未认领标签在**任何阶段**（含并集）都不得被拒绝、
+  永不进 deny、唯一例外是阶段显式 `strict:true`
+- 新增断言：探针记录**不含**任何"哪个插件改了什么"的归因字段（不越权）
+
+### Refactor —— index.js 腾行
+
+- `RENDER` / `toNum` 搬到 `lib/util.js`，index.js **1198 → 1195 行**（加完新功能后回到 1198，仍在 1200 守卫线内）
+
+### Docs
+
+- 新增 `docs/LIMITS.md`：并集代价、本地小模型接口与启用条件（本版不写代码）、未认领放行、
+  收窄够不到的东西、探针职责边界
+
+**全量 356 项通过。**
+
 ## [1.19.1] — 2026-10-31
 
 并集功能落地过程中，端到端测试抓出了**两个真 bug**（都不是并集算法本身的问题）。

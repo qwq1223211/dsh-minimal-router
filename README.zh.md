@@ -1,4 +1,4 @@
-# 极简路由（dsh-minimal-router）· v1.19.1 · 小白版说明
+# 极简路由（dsh-minimal-router）· v1.19.2 · 小白版说明
 
 [![Tests](https://github.com/qwq1223211/dsh-minimal-router/actions/workflows/test.yml/badge.svg)](https://github.com/qwq1223211/dsh-minimal-router/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
@@ -47,6 +47,7 @@ dsh plugin --profile desktop add github:qwq1223211/dsh-minimal-router
 **它不做什么**（装之前请先看）：不缩系统提示（那才是大头）、省下的多是缓存价 token（账单可能几乎不动）、
 不能和另一个工具路由同时开。
 
+> `unionEnabled` (multi-domain union) is **@experimental and off by default**; see [docs/LIMITS.md](./docs/LIMITS.md).
 ---
 
 ## 安装（两种方式，任选一个）

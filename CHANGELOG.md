@@ -3,6 +3,47 @@
 All notable changes to `dsh-minimal-router`.
 Format: [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/).
 
+## [1.19.1] — 2026-10-31
+
+并集功能落地过程中，端到端测试抓出了**两个真 bug**（都不是并集算法本身的问题）。
+
+### Fixed 1：关键词路径会"抢先 return"，并集永远不触发
+
+`detectStage` 原来是"第一个命中的阶段直接返回"。
+跨领域句"写个 Python 脚本…整理成周报文档"里，**"脚本"同时命中 python-code，句子又命中 document-write**，
+但第一次命中就 return 了，调用方 `index.js` 的意图判定（会返回并集）**根本没机会跑**。
+
+修法：`detectStage` 先收集所有命中阶段；**命中 ≥2 个时**委托 `lib/intent.js` 的打分器给结论，
+且只接受"结论里的阶段都真的命中过关键词"的结果（防止打分器凭空引入阶段）。
+Unity 场景不受影响（"做个 Unity UI 设置界面"仍判 unity-ui，有测试守着）。
+
+### Fixed 2：`mergeStages` 把 Proxy 吃掉了
+
+`index.js:434` 是 `cfg.stages = mergeStages(DEFAULT_STAGES, …)`，
+而 `mergeStages` 返回**普通对象** → `DEFAULT_STAGES` 上的 Proxy 丢失 →
+`cfg.stages["document-write+python-code"]` 变成 `undefined` →
+并集名被当成"未知阶段"，`route_stage` 直接拒绝。
+
+修法：在 `lib/stages-config.js` 的 `mergeStages` 返回值上重新包一层 `withUnion`。
+**仍然没有碰 index.js。**
+
+### Added：端到端测试（验收标准本身）
+
+`test/union-e2e.test.mjs` 起一个假 ctx，调**真实的 `apply()`**，
+走真实的 `agent/created` + `agent/inbox/claimed` 钩子，再调**真实的 `route_status`**：
+
+- 输入 "帮我写个 Python 脚本爬取网页，然后整理成一份周报文档"
+- `route_status.stage === "document-write+python-code"`
+- `restrictedFor` 也是并集，`restrictedToolCount > 0`
+- `terminal_spawn` / `office_docx_create` / `study_card_add` 都还在
+- `unity_object_create` / `meshy_image_to_3d` 被摘掉
+- 未认领标签（ego）保留 —— 不误杀新插件是设计底线
+
+写这个测试还暴露了两个夹具坑：必须喂 `agent/created`（否则 router 没有 agentRefs，收窄不生效）、
+必须关掉 `autoRestrictPolicy`（上下文为 0 时算不出收益，会被判"不划算"）。
+
+**全量 348 项通过**。
+
 ## [1.19.0] — 2026-10-31
 
 **多领域并集**：跨领域任务不再"判不出来就什么都不做"。

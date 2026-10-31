@@ -30,8 +30,18 @@ import {
   claimedTags,
   decideOutOfStage,
   computeDenyList,
+  suggestStageForTag,
 } from './lib/classify.js'
 import { createStageState, textOfMessage, detectStage, isExplicitSwitch, createSwitchArbiter } from './lib/stage.js'
+import { createIntentDetector } from './lib/intent.js'
+import { createUsageTracker } from './lib/usage.js'
+import { createSignalStore } from './lib/adaptive.js'
+import { STATE_DIR, collectStrings, pickProbeDataFile } from './lib/util.js'
+import { createActivityLog } from './lib/activity.js'
+import { createFeedback } from './lib/feedback.js'
+
+// 这些符号历史上由 index.js 导出，测试和外部用户可能直接 import —— 保持兼容
+export { STATE_DIR, collectStrings, pickProbeDataFile }
 import { estimateSwitchEconomy, decideByEconomy, describeEconomy, measureDeniedBytes } from './lib/cost.js'
 import { registerDynamicTools } from './lib/tools-dynamic.js'
 import { renderHint, HINT_LIMIT } from './lib/prompt.js'
@@ -59,16 +69,6 @@ import { writeFile, mkdir } from 'node:fs/promises'
 import { existsSync, mkdirSync, copyFileSync, readFileSync, readdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { homedir } from 'node:os'
-
-/**
- * 【运行时数据目录】必须放在包外面。
- *
- * 为什么：用 `dsh plugin add github:...` 安装时，包会被 pnpm 放进
- * `node_modules/.pnpm/<hash>/`，那是个**会被重装整体替换**的虚拟目录，
- * 升级一次数据就没了，也可能根本没有写权限。
- * link 安装（本地目录）看不出这个问题——所以这个坑只在"别人装了"的时候才炸。
- */
-export const STATE_DIR = join(homedir(), '.dsh', 'minimal-router')
 
 // 【修改这里】插件在插件管理器里显示的名字
 export const name = 'minimal-router'
@@ -102,61 +102,11 @@ function optionalService(ctx, name) {
 }
 
 // ============================================================================
-// 【修改这里】阶段定义 —— 想加阶段/改关键词就在这里改
-// allow 里写的是「工具名前缀的标签」，例如 'unity' 会罩住 unity_* 全部工具。
+// 阶段定义搬到了 lib/stages-default.js（纯数据，给入口文件腾行数）
+// 想加阶段/改关键词去那里改；这里保留 re-export 兼容老引用。
 // ============================================================================
-export const DEFAULT_STAGES = {
-  auto: {
-    title: '自动',
-    allow: [],
-    keywords: [],
-  },
-  core: {
-    title: '通用',
-    allow: [],
-    keywords: ['通用', '基础', 'core'],
-  },
-  // 【修改这里】Unity 代码阶段：把 Unity 的全部子系统都收进来（安全网必须密）
-  'unity-code': {
-    title: 'Unity 代码',
-    allow: [
-      'unity',
-      'asset',
-      'level',
-      'perf',
-      'save',
-      'lighting',
-      'player',
-      'enemy',
-      'l10n',
-      'gameplay',
-      'dialogue',
-      'quest',
-      'uikit',
-      'uiflow',
-    ],
-    keywords: ['代码', '脚本', '编译', '报错', 'controller', 'script', 'compile', 'c#', 'csharp', 'unity'],
-  },
-  // 【修改这里】Unity UI 阶段：UI 相关的子系统也一起收进来
-  'unity-ui': {
-    title: 'Unity UI',
-    allow: ['unity', 'ui', 'uikit', 'uiflow', 'dialogue', 'quest'],
-    keywords: ['界面', '按钮', '布局', 'canvas', 'hud', 'panel', '面板', 'ui'],
-  },
-  art: {
-    title: '美术',
-    allow: ['art', 'meshy', 'image', 'asset'],
-    keywords: ['贴图', '模型', '素材', '美术', 'texture', 'model', 'sprite', 'mesh', 'icon'],
-  },
-  audio: {
-    title: '音频',
-    allow: ['audio'],
-    keywords: ['音效', '音乐', 'audio', 'sfx', 'bgm'],
-  },
-}
-
-// 【修改这里】关键词匹配顺序：越靠前越优先（更具体的放前面）
-const STAGE_ORDER = ['unity-ui', 'art', 'audio', 'unity-code', 'core']
+import { DEFAULT_STAGES, STAGE_ORDER } from './lib/stages-default.js'
+export { DEFAULT_STAGES }
 
 const CONFIG_DEFAULTS = {
   // 【修改这里】没有任何命中时的阶段。'auto' = 只提示不拦截（零摩擦，推荐）
@@ -245,6 +195,26 @@ const CONFIG_DEFAULTS = {
   // 【修改这里】演示/调试用：强制假装当前模型是这个名字（用来现场演示降级保护）
   //   例：simulateModel: deepseek-v4-pro  → 立刻触发降级警告，且不花一分钱
   simulateModel: '',
+  // 【修改这里】★ 语义打分路由：关键词没命中时，用本地字符统计再猜一次
+  //   零额外请求（不调模型），猜不准就返回 null，退回"粘住当前阶段"
+  //   minScore 越低越激进；minMargin 是"领先第二名的比例"，防平票乱切
+  intentRouting: true,
+  intentMinScore: 2.0,
+  intentMinMargin: 0.25,
+  // 【修改这里】★ 使用画像：记录每个工具被调用过几次，找出"从没用过"的那些
+  //   只统计、不卸载；数据写在 ~/.dsh/minimal-router/tool-usage.json
+  usageTracking: true,
+  // 【修改这里】★ 自适应阶段：从"最近真的调用了哪些工具组"里学，自动切阶段
+  //   默认关闭 —— 它会自动改工具表，而切一次可能要付整段前缀的重建成本
+  //   打开后仍然要过：成本闸门 + 迟滞（不会一次命中就切）
+  adaptiveStage: false,
+  adaptiveWindow: 20, // 看最近多少次工具调用
+  adaptiveMinCalls: 6, // 至少命中这么多次才敢动
+  adaptiveMinShare: 0.6, // 且要占到 60% 以上
+  // 【修改这里】★ 智能开关：只在"回本划算"的时候真的物理瘦身
+  //   小会话（重建便宜）照常瘦；大会话（重建贵）只提示不瘦，避免白付一次全量重建
+  //   显式 route_stage 不受影响
+  autoRestrictPolicy: true,
   // 【修改这里】同包另外两个模块的总开关（高级用户可以单独关掉）
   guardEnabled: true, // 连续错误熔断器
   probeEnabled: true, // 缓存探针（想看真实账单就必须开）
@@ -375,6 +345,30 @@ export function normalizeConfig(raw = {}) {
         ? Number(src.switchPaybackTurns)
         : CONFIG_DEFAULTS.switchPaybackTurns,
     simulateModel: typeof src.simulateModel === 'string' ? src.simulateModel.trim() : '',
+    intentRouting: src.intentRouting !== false,
+    usageTracking: src.usageTracking !== false,
+    adaptiveStage: src.adaptiveStage === true,
+    autoRestrictPolicy: src.autoRestrictPolicy !== false,
+    adaptiveWindow:
+      Number.isFinite(Number(src.adaptiveWindow)) && Number(src.adaptiveWindow) >= 3
+        ? Math.trunc(Number(src.adaptiveWindow))
+        : CONFIG_DEFAULTS.adaptiveWindow,
+    adaptiveMinCalls:
+      Number.isFinite(Number(src.adaptiveMinCalls)) && Number(src.adaptiveMinCalls) >= 1
+        ? Math.trunc(Number(src.adaptiveMinCalls))
+        : CONFIG_DEFAULTS.adaptiveMinCalls,
+    adaptiveMinShare:
+      Number.isFinite(Number(src.adaptiveMinShare)) && Number(src.adaptiveMinShare) > 0 && Number(src.adaptiveMinShare) <= 1
+        ? Number(src.adaptiveMinShare)
+        : CONFIG_DEFAULTS.adaptiveMinShare,
+    intentMinScore:
+      Number.isFinite(Number(src.intentMinScore)) && Number(src.intentMinScore) >= 0
+        ? Number(src.intentMinScore)
+        : CONFIG_DEFAULTS.intentMinScore,
+    intentMinMargin:
+      Number.isFinite(Number(src.intentMinMargin)) && Number(src.intentMinMargin) >= 0 && Number(src.intentMinMargin) <= 1
+        ? Number(src.intentMinMargin)
+        : CONFIG_DEFAULTS.intentMinMargin,
     guardEnabled: src.guardEnabled !== false,
     probeEnabled: src.probeEnabled !== false,
     guard: src.guard && typeof src.guard === 'object' && !Array.isArray(src.guard) ? src.guard : {},
@@ -393,51 +387,6 @@ export function normalizeConfig(raw = {}) {
     lintMaxArgChars: Number.isFinite(Number(src.lintMaxArgChars)) ? Math.max(2000, Math.trunc(Number(src.lintMaxArgChars))) : CONFIG_DEFAULTS.lintMaxArgChars,
     maxSessions: Number.isFinite(Number(src.maxSessions)) ? Math.max(1, Math.trunc(Number(src.maxSessions))) : CONFIG_DEFAULTS.maxSessions,
   }
-}
-
-/** 收集参数里所有长得像文本的值（有界递归，绝不无限展开）。 */
-export function collectStrings(value, options = {}) {
-  const maxDepth = Number.isFinite(options.maxDepth) ? options.maxDepth : 4
-  const maxChars = Number.isFinite(options.maxChars) ? options.maxChars : 200000
-  const out = []
-  let budget = maxChars
-
-  function walk(node, depth) {
-    if (budget <= 0 || depth > maxDepth) return
-    if (typeof node === 'string') {
-      if (node.length === 0) return
-      const take = node.slice(0, budget)
-      budget -= take.length
-      out.push(take)
-      return
-    }
-    if (Array.isArray(node)) {
-      for (const item of node) walk(item, depth + 1)
-      return
-    }
-    if (node && typeof node === 'object') {
-      for (const item of Object.values(node)) walk(item, depth + 1)
-    }
-  }
-
-  walk(value, 0)
-  return out
-}
-
-/**
- * 决定探针数据文件的位置（纯函数，好测）。
- *
- * 【坑】别写成 `{ dataFile: 计算值, ...cfg.probe }` —— 配置里 `dataFile: ''`
- * 会把算好的路径覆盖成空串，然后探针就回退到包目录里去了（实测踩过）。
- *
- * @param {{dataFile?:string}} probeConfig
- * @param {string} [stateDir]
- * @returns {string}
- */
-export function pickProbeDataFile(probeConfig = {}, stateDir = STATE_DIR) {
-  const explicit =
-    probeConfig && typeof probeConfig.dataFile === 'string' ? probeConfig.dataFile.trim() : ''
-  return explicit || join(stateDir, 'usage.jsonl')
 }
 
 /**
@@ -486,6 +435,18 @@ export function apply(ctx, config = {}) {
   if (!cfg.stages[cfg.defaultStage]) cfg.defaultStage = 'auto'
 
   const claimed = claimedTags(cfg.stages)
+  // 语义打分器：画像只建一次；猜不准返回 null，调用方就退回"粘住"
+  const intentDetector = cfg.intentRouting
+    ? createIntentDetector(cfg.stages, { minScore: cfg.intentMinScore, minMargin: cfg.intentMinMargin })
+    : null
+  let lastIntent = null
+  // 使用画像：内存计数 + 定时落盘（落盘失败不影响主流程）
+  const usage = createUsageTracker({ file: join(STATE_DIR, 'tool-usage.json') })
+  // 活动日志：记录"它实际做了什么"（切了什么、拦了谁），供 route_activity 查看
+  const activity = createActivityLog({ file: join(STATE_DIR, 'activity.jsonl') })
+  // 自适应信号：每个会话一个滑动窗口（只看最近 N 次真实调用）
+  const signals = createSignalStore({ size: cfg.adaptiveWindow, max: cfg.maxSessions })
+  let lastAdaptive = null
   const state = createStageState({
     stages: cfg.stages,
     defaultStage: cfg.defaultStage,
@@ -516,6 +477,8 @@ export function apply(ctx, config = {}) {
   const disclosedTags = new Map()
   // 【任务驱动】key → { groups:Set, remainingTurns, createdAt } 临时收窄工具面
   const dynamicGrants = new Map()
+  // 【B/C】建议 + 拦截回收：状态在 lib/feedback.js，这里只管接线
+  const feedback = createFeedback()
   // 每个会话最近一次请求的真实上下文长度（token），安全闸门用
   const promptTokensBySession = new Map()
   // 已经被闸门拦过的会话（用于"只警告一次"）
@@ -633,6 +596,34 @@ export function apply(ctx, config = {}) {
       }
     }
 
+    // 【A · 智能开关】只在"划算"的时候真的瘦身
+    //   重建成本 ≈ 当前上下文全价；每轮收益 ≈ 被摘掉那部分工具声明的 token
+    //   回本超过 switchPaybackTurns 就不瘦：省不了钱，还白付一次重建
+    //   显式 route_stage 不拦（用户亲口要求的，照办）
+    if (cfg.autoRestrictPolicy && stage !== 'auto' && !state.get(key).explicit) {
+      try {
+        const economy = estimateForStage(key, stage)
+        const verdict = decideByEconomy({
+          economy,
+          maxPaybackTurns: cfg.switchPaybackTurns,
+          enabled: true,
+        })
+        if (!verdict.allow) {
+          activity.log('restrict', { stage, skipped: verdict.reason, payback: economy.paybackTurns })
+          return {
+            applied: false,
+            reason: `policy:${verdict.reason}`,
+            stage,
+            paybackTurns: economy.paybackTurns,
+            savePerTurn: economy.savePerTurnTokens,
+            hint: '不划算：重建成本还没赚回来，先只提示不瘦身',
+          }
+        }
+      } catch {
+        // 算不出来就照常瘦（保守：宁可省不了，也别因为算错而不动）
+      }
+    }
+
     // 1) 先拆掉旧限制（必须在新列表计算之前）
     if (current) {
       try {
@@ -724,6 +715,7 @@ export function apply(ctx, config = {}) {
         denyCount: deny.length,
         visible: names.length,
       })
+      activity.log('restrict', { stage, mode, deny: deny.length })
       return {
         applied: true,
         reason: 'ok',
@@ -809,6 +801,7 @@ export function apply(ctx, config = {}) {
     if (!cap.safe) {
       // 降级：把已经挂上的物理限制全部拆掉
       dropRestrictions('degraded')
+      activity.log('degrade', { model: model || '?', reason: cap.reason })
     }
 
     const key = `${provider || '?'}/${model || '?'}/${cap.safe ? 'ok' : 'degraded'}`
@@ -868,7 +861,19 @@ export function apply(ctx, config = {}) {
     if (hintOffSessions.has(key)) return ''
     try {
       const snapshot = state.get(key)
-      return renderHint({ stage: snapshot.stage, stages: cfg.stages, claimed, limit: cfg.hintMaxChars }).text
+      // 【B · 主动建议】只在 auto 阶段给建议（已经在阶段里，就别再添噪音）
+      const sug = feedback.getSuggestion(key)
+      const suffix =
+        snapshot.stage === 'auto' && sug && sug.stage && Date.now() - sug.at < 5 * 60 * 1000
+          ? `Tip: looks like ${sug.stage}; if so, route_use(["${sug.tag}"],3).`
+          : ''
+      return renderHint({
+        stage: snapshot.stage,
+        stages: cfg.stages,
+        claimed,
+        limit: cfg.hintMaxChars,
+        suffix,
+      }).text
     } catch {
       return ''
     }
@@ -985,12 +990,14 @@ export function apply(ctx, config = {}) {
         const key = keyOf(exec)
         const snapshot = state.get(key)
         let catalog = { tags: {}, total: 0 }
+        let registeredNames = []
         try {
           // 【注意】ctx.tools.schemas() 返回的是"注册表视图"，**不反映 restrict 限制**
           // （实测：限制生效后 schemas() 依然返回 153 条）。
           // 所以这里只报"注册了多少"，真实发出去多少要以 cache_probe_report 为准。
           const schemas = typeof ctx.tools.schemas === 'function' ? ctx.tools.schemas() : []
-          catalog = buildCatalog(schemas.map((tool) => tool && tool.name).filter(Boolean), cfg.coreTools)
+          registeredNames = schemas.map((tool) => tool && tool.name).filter(Boolean)
+          catalog = buildCatalog(registeredNames, cfg.coreTools)
         } catch {
           // 拿不到工具清单就空着
         }
@@ -1057,6 +1064,26 @@ export function apply(ctx, config = {}) {
           lastBlockedSwitch,
           // 迟滞/冷却状态：为什么刚才那句关键词没让阶段变
           switchArbiter: switchArbiter.snapshot(key),
+        // 语义打分路由：开关 / 阈值 / 最近一次判定（猜不准时是 null）
+        intentRouting: cfg.intentRouting,
+        intentMinScore: cfg.intentMinScore,
+        intentMinMargin: cfg.intentMinMargin,
+        lastIntent,
+        // 自适应阶段：默认关闭；开了之后最近一次判定也在这里
+        adaptiveStage: cfg.adaptiveStage,
+        adaptiveWindow: cfg.adaptiveWindow,
+        lastAdaptive,
+        // 活动日志：只回最近 5 条，完整记录用 route_activity 查
+        activity: activity.summary(),
+        recentActivity: activity.recent(5),
+        // 智能开关 + 主动建议 + 闭环统计
+        autoRestrictPolicy: cfg.autoRestrictPolicy,
+        pendingSuggestion: feedback.getSuggestion(key),
+        denyRecovery: feedback.summary(key),
+        // 空转工具画像：哪些工具从装上到现在一次都没被调用过（→ 那些插件可以卸）
+        toolUsage: cfg.usageTracking
+          ? usage.summarize(registeredNames, (n) => tagOf(n, cfg.coreTools))
+          : null,
           lastArbiterDecision,
           // 任务驱动的临时收窄（route_use）
           dynamicGroups: dynamicGrants.get(key) ? [...dynamicGrants.get(key).groups] : [],
@@ -1112,8 +1139,19 @@ export function apply(ctx, config = {}) {
   registerDynamicTools(ctx, {
     RENDER,
     keyOf,
+    // 活动日志：给 route_activity 用；只读，不暴露内部数组
+    readActivity(args) {
+      const limit = args && Number.isFinite(Number(args.limit)) ? Number(args.limit) : 20
+      const kind = args && typeof args.kind === 'string' ? args.kind : ''
+      return {
+        summary: activity.summary(),
+        kinds: activity.kinds,
+        events: activity.recent(limit, kind),
+      }
+    },
 
     resetSession(key, agent) {
+      activity.log('reset', { stage: state.get(key).stage })
       const before = state.get(key)
       state.reset(key)
       switchArbiter.reset(key)
@@ -1139,6 +1177,7 @@ export function apply(ctx, config = {}) {
 
     setGrant(key, groups, turns, agent) {
       dynamicGrants.set(key, { groups: new Set(groups), remainingTurns: turns, createdAt: Date.now() })
+      activity.log('grant', { groups: groups.join(','), turns })
       const restriction = refreshRestriction(key, agent)
       return {
         ok: true,
@@ -1288,6 +1327,18 @@ export function apply(ctx, config = {}) {
 
     try {
       const toolName = exec && typeof exec.name === 'string' ? exec.name : ''
+      const denyKey = keyOf(exec)
+
+      // ---- 5.0 使用画像：记一次真实调用（空转工具画像的唯一数据源）----
+      if (cfg.usageTracking && toolName) usage.record(toolName)
+      // 自适应信号：只记"非基础工具"的组名，基础工具哪个阶段都该在
+      if (cfg.adaptiveStage && toolName) {
+        try {
+          signals.push(keyOf(exec), tagOf(toolName, cfg.coreTools))
+        } catch {
+          // 静默
+        }
+      }
 
       // 逃生门：永远放行，连体检都不做（否则逃生门自己也可能被拦）
       if (!ALWAYS_ALLOW.includes(toolName)) {
@@ -1302,6 +1353,7 @@ export function apply(ctx, config = {}) {
             const reason = formatFindings(blocks, `工具 ${toolName}`)
             lastLintHit = reason
             if (cfg.lintMode === 'deny') {
+              activity.log('deny', { by: 'lint', tool: toolName })
               return { kind: 'deny', reason, info: { name: 'minimal-router', code: 'LINT_DEAD_LOOP' } }
             }
             // warn 模式：只记不拦
@@ -1317,10 +1369,14 @@ export function apply(ctx, config = {}) {
           const snapshot = state.get(key)
           const verdict = decideOutOfStage({ toolName, stage: snapshot.stage, stages: cfg.stages, claimed, coreTools: cfg.coreTools })
           if (!verdict.allow) {
+            activity.log('deny', { by: 'stage', stage: snapshot.stage, tool: toolName })
+            feedback.noteDeny(key)
             return { kind: 'deny', reason: verdict.reason, info: { name: 'minimal-router', code: 'STAGE_DENIED' } }
           }
         }
       }
+      // 【C · 闭环】上一次被拦之后，模型换了别的工具继续干 → 记一次"自己恢复了"
+      if (toolName && !ALWAYS_ALLOW.includes(toolName)) feedback.noteRecover(denyKey)
     } catch {
       // 插件自己算错了 → 放行，宁可少拦一次也不能堵死用户
     }
@@ -1356,7 +1412,42 @@ export function apply(ctx, config = {}) {
         }
       }
 
-      const detected = detectStage(text, cfg.stages, cfg.stageOrder)
+      // ---- 阶段判定：关键词优先，没命中再用语义打分补一刀 ----
+      // 语义结果同样要过下面三道闸门（上下文 / 成本 / 迟滞），所以猜错也不会立刻切
+      const keywordStage = detectStage(text, cfg.stages, cfg.stageOrder)
+      let detected = keywordStage
+      lastIntent = null
+      if (!detected && intentDetector) {
+        const guess = intentDetector(text)
+        if (guess) {
+          detected = guess.stage
+          lastIntent = { at: Date.now(), by: 'intent', ...guess, from: state.get(key).stage }
+        } else if (typeof intentDetector.probe === 'function') {
+          // 【B】正式判定没过，但"有点像" → 记一条建议，让提示里多一句，不切阶段
+          const soft = intentDetector.probe(text)
+          if (soft) {
+            const def = cfg.stages[soft.stage]
+            const tag = def && Array.isArray(def.allow) && def.allow[0] ? String(def.allow[0]) : ''
+            if (tag) feedback.setSuggestion(key, { stage: soft.stage, tag, score: soft.score })
+          }
+        }
+      }
+      // ---- 自适应：关键词和语义都没说话时，看"最近真的用了什么" ----
+      // 只在 auto 阶段才敢动（已经在某个阶段里，说明有人在管，别抢方向盘）
+      lastAdaptive = null
+      if (!detected && cfg.adaptiveStage && state.get(key).stage === 'auto') {
+        const sig = signals.dominant(key, {
+          minCalls: cfg.adaptiveMinCalls,
+          minShare: cfg.adaptiveMinShare,
+        })
+        if (sig) {
+          const target = suggestStageForTag(sig.tag, cfg.stages)
+          if (target) {
+            detected = target
+            lastAdaptive = { at: Date.now(), by: 'adaptive', stage: target, ...sig }
+          }
+        }
+      }
       const current = state.get(key).stage
 
       // ---- 闸门 1：上下文过大时，任何"会改工具表"的切换都要拦 ----
@@ -1378,6 +1469,7 @@ export function apply(ctx, config = {}) {
               `要强制切换请用 route_stage({"stage":"${detected}","force":true})，或开新会话。`,
           )
         }
+        activity.log('block', { by: 'context', from: current, to: detected })
         return
       }
 
@@ -1409,6 +1501,7 @@ export function apply(ctx, config = {}) {
                 ` 显式切换仍可用 route_stage。`,
             )
           }
+          activity.log('block', { by: 'cost', from: current, to: detected, payback: economy.paybackTurns })
           return
         }
       }
@@ -1423,7 +1516,15 @@ export function apply(ctx, config = {}) {
           return
         }
         lastArbiterDecision = { at: Date.now(), key, from: current, to: detected, ...decision }
-        state.onUserMessage(key, text)
+        // 关键词命中走状态机（它自己会再判一次）；语义命中直接应用，避免被"粘住"分支吃掉
+        if (keywordStage) state.onUserMessage(key, text)
+        else state.applyStage(key, detected, 'intent')
+        activity.log('switch', {
+          from: current,
+          to: detected,
+          by: keywordStage ? 'keyword' : lastAdaptive ? 'adaptive' : 'intent',
+        })
+        feedback.clearSuggestion(key)
         switchArbiter.noteSwitched({ key })
         refreshRestriction(key, payload && payload.agent)
         return

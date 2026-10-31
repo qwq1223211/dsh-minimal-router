@@ -33,6 +33,11 @@ const SUITES = [
   'test/instrument.test.mjs',
   'test/install-elsewhere.test.mjs',
   'test/migration.test.mjs',
+  'test/intent.test.mjs',
+  'test/usage.test.mjs',
+  'test/adaptive.test.mjs',
+  'test/activity.test.mjs',
+  'test/feedback.test.mjs',
 ]
 
 const covDir = mkdtempSync(join(tmpdir(), 'dsh-cov-'))

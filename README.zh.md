@@ -1,4 +1,4 @@
-# 极简路由（dsh-minimal-router）· v1.15.1 · 小白版说明
+# 极简路由（dsh-minimal-router）· v1.18.0 · 小白版说明
 
 [![Tests](https://github.com/qwq1223211/dsh-minimal-router/actions/workflows/test.yml/badge.svg)](https://github.com/qwq1223211/dsh-minimal-router/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
@@ -145,13 +145,13 @@ DSH 默认会把**所有**插件的工具说明一次性塞给模型。装了几
 
 ---
 
-## 二、装一次，得到三个模块、九个工具
+## 二、装一次，得到三个模块、十一个工具
 
 **一个包，一次安装，一次重载。** 你不用分三次装三个插件——因为**每装一次插件就要重载一次，而每次重载都可能触发一次全量前缀重建**（实测最贵的一次 51 万 token）。
 
 | 模块 | 工具 | 作用 |
 |---|---|---|
-| **路由**（主角） | `route_stage` `route_status` `route_reset` `route_init` | 分阶段、物理砍工具、切阶段 |
+| **路由**（主角） | `route_stage` `route_status` `route_reset` `route_init` `route_use` `route_hint` `route_activity` | 分阶段、物理砍工具、切阶段、看它干了什么 |
 | **熔断** | `guard_status` `guard_reset` | 连续 3 次工具失败就中断，防止死循环烧钱 |
 | **探针** | `cache_probe_report` `cache_probe_clear` | 记录每次请求的真实 token 账单，用来验证省钱效果 |
 
@@ -163,6 +163,31 @@ probeEnabled: false   # 关掉探针
 ```
 
 > 强烈建议**保留探针**：没有它你没法验证到底省了多少，也没法发现"某次操作把缓存打爆了"。
+
+### 想看"它到底做了什么"？用 route_activity
+
+`route_status` 回答的是**此刻**是什么状态；`route_activity` 回答的是**刚才**发生了什么。
+
+```
+route_activity()                       # 最近 20 条
+route_activity({ "limit": 50 })        # 最近 50 条
+route_activity({ "kind": "deny" })     # 只看被拦下的调用
+```
+
+记七种事：`switch`（切阶段）、`restrict`（改工具表）、`deny`（拦调用）、`block`（闸门拦截）、`grant`（临时收窄）、`reset`（复位）、`degrade`（降级）。
+
+返回长这样：
+
+```json
+{
+  "summary": { "total": 12, "text": "最近共 12 条：切阶段 2 次 · 拦截调用 9 次 · 改工具表 1 次" },
+  "events": [
+    { "t": 1730000000000, "kind": "deny", "by": "stage", "stage": "core", "tool": "unity_object_create" }
+  ]
+}
+```
+
+日志存在 `~/.dsh/minimal-router/activity.jsonl`，只留最近 200 条，**不会随时间无限长**。
 
 ### 路由模块的四个工具
 
@@ -499,6 +524,126 @@ accumulateDisclosure: true
 | 装了 QQ / 消息类插件的门禁 | 只要那个门禁也在 `pre-execute` 上按同样规则 `next()`，就能共存；如果你发现消息发不出去，先把本插件 `enforceStage` 关掉二分排查 |
 
 一句话：**本插件永远站在"少拦一次"这边**——算不清就放行、缺服务就降级、出异常就 `next()`。
+
+## 五之四、🧠 三个"更聪明"的能力（v1.16）
+
+三个都不发额外请求、不调模型，所以**不会多花你一分钱上下文**。
+
+### 1. 语义打分路由（默认开）
+
+关键词没命中时，用本地字符统计再猜一次。
+
+| 你说的话 | 免关键词也能认出 |
+|---|---|
+| 帮我把那个**按钮**挪一下 | `unity-ui` |
+| 跑一下**编译**看看哪里**报错** | `unity-code` |
+| 给我加个**背景音乐** | `audio` |
+| 今天天气怎么样 | **不切**（返回 null） |
+
+规则很简单：**领先第二名不到 25% 就不猜**。猜错也不会立刻切——它和关键词走同一条闸门链（上下文闸门 → 成本闸门 → 迟滞）。
+
+```yaml
+intentRouting: true      # 关掉就退回纯关键词
+intentMinScore: 2.0      # 分数门槛，调高更保守
+intentMinMargin: 0.25    # 领先幅度，调高更保守
+```
+
+### 2. 空转工具画像（默认开）
+
+记录每个工具**真正被调用**过几次，写在 `~/.dsh/minimal-router/tool-usage.json`。
+
+调 `route_status`，里面多了一段：
+
+```json
+"toolUsage": {
+  "unusedTools": 62,
+  "unusedRatio": 0.45,
+  "unusedGroups": [{ "tag": "unity", "unused": 12, "total": 26 }],
+  "advice": "有 62 个工具自安装以来一次都没被调用过；对应的插件可以考虑卸载"
+}
+```
+
+> 它只给建议，**不会替你卸插件**——卸载是不可逆的跨项目操作。
+
+```yaml
+usageTracking: true
+```
+
+### 3. 自适应阶段（默认关）
+
+从**最近 20 次真实调用**里学：某组占 60% 以上、且至少 6 次，才在 `auto` 阶段提议切换。
+
+```yaml
+adaptiveStage: false     # 默认关；想试就打开
+adaptiveWindow: 20       # 看最近多少次调用
+adaptiveMinCalls: 6      # 至少命中这么多次
+adaptiveMinShare: 0.6    # 且要占到 60%
+```
+
+**为什么默认关**：它会自动改工具表，而切一次可能要付整段前缀的重建成本（实测最贵 51.4 万 token）。打开了也仍然要过成本闸门和迟滞，一次命中不会切。
+
+### 三个能力在 `route_status` 里怎么查
+
+| 字段 | 含义 |
+|---|---|
+| `lastIntent` | 最近一次语义判定（猜不准就是 `null`） |
+| `toolUsage` | 空转工具画像 |
+| `adaptiveStage` / `lastAdaptive` | 自适应开关和最近一次信号 |
+
+> v1.16 起共 **312 项测试**（新增 intent 11、usage 6、adaptive 7）。
+
+## 五之五、🧠 三件"主动的聪明"（v1.18）
+
+前面三个能力是"被动响应"；这三个会**自己判断**。
+
+### 1. 智能开关：只在划算的时候瘦身（默认开）
+
+切阶段前先算一笔账：
+
+```
+重建成本（≈ 当前上下文全价）÷ 每轮收益（被摘掉那部分工具声明的 token）= 回本轮数
+```
+
+- **回本 ≤ 3 轮** → 照常物理瘦身
+- **回本 > 3 轮**（典型：50 万 token 的会话）→ **只提示、不瘦身**
+
+因为在这种会话里切一次要付 50 万全价，却只省 2.6 万/轮 —— 19 轮才回本，白折腾。
+
+```yaml
+autoRestrictPolicy: true   # 关掉就恢复"只要切了就瘦"
+```
+
+> 显式 `route_stage` 不受影响：你自己要求的，照办。
+
+### 2. 主动建议：不确定的时候，说一句而不是沉默
+
+语义分没到"敢切"的门槛、但明显有感时，不切阶段，只在尾部提示里加一行：
+
+```
+Tip: looks like art; if so, route_use(["art"],3).
+```
+
+把决定权交回模型，**零额外请求**，仍然受 200 字硬上限约束。
+
+### 3. 拦截回收统计：拦得对不对，有数了
+
+被拦之后 2 分钟内，模型换了个工具继续干 → 记一次"自己恢复"。
+
+`route_status.denyRecovery` 给出：
+
+```json
+{ "denied": 12, "recovered": 9, "rate": 0.75, "note": "拦截后多数能自己换路，阈值合适" }
+```
+
+恢复率低（比如 0.25）说明：拦截太严、或者提示文案太模糊。
+
+### 4. 本机调参脚本
+
+```
+node scripts/tune.mjs --days 7
+```
+
+读 `~/.dsh/minimal-router/` 下的活动日志和工具画像，直接给建议：拦截是不是太多、有多少工具从没用过、成本闸门是不是经常拦。**数据不出本机。**
 
 ## 六、三个铁血规则（不是配置项，改不了）
 

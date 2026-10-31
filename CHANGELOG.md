@@ -3,6 +3,80 @@
 All notable changes to `dsh-minimal-router`.
 Format: [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/).
 
+## [1.18.0] — 2026-10-31
+
+三件"主动的聪明"：不再只是被动响应，而是**自己判断划不划算、该不该开口、拦得对不对**。
+
+### 新增 · 智能开关（`autoRestrictPolicy`，默认开）
+切阶段时先算账：重建成本（≈ 当前上下文全价）÷ 每轮收益（被摘掉那部分工具声明的 token）= 回本轮数。
+- 回本 ≤ `switchPaybackTurns`（默认 3 轮）→ 照常物理瘦身
+- 回本 > 3 轮（典型：50 万 token 的会话）→ **只提示不瘦身**，避免白付一次全量重建
+- `route_stage` 显式切换不受影响（用户亲口要求的照办）
+
+### 新增 · 主动建议（尾部提示里的 `Tip:`）
+语义分没到"敢切"的门槛、但明显有感时，不切阶段，只在尾部提示里加一句：
+`Tip: looks like art; if so, route_use(["art"],3).`
+把决定权交回模型，零额外请求，仍受 200 字硬上限约束。
+
+### 新增 · 拦截回收统计（`denyRecovery`）
+被拦后 2 分钟内模型换了个工具继续干 → 记一次"自己恢复"。
+`route_status.denyRecovery` 给出 `{denied, recovered, rate, note}`，用来判断**拦截阈值是不是太严、提示文案是不是太模糊**。
+
+### 新增 · 本机调参脚本
+```
+node scripts/tune.mjs --days 7
+```
+读 `~/.dsh/minimal-router/` 下的 activity / tool-usage，直接给你调参建议（数据不出本机）。
+
+### 测试
+- 320 → **329**（feedback 7 + intent 探针 2）
+
+## [1.17.0] — 2026-10-31
+
+**"它到底做了什么"** —— 新增活动日志与 `route_activity` 工具。
+
+### 新增 · 活动日志（`lib/activity.js`）
+- 记录七类事件：`switch`（切阶段）、`restrict`（改工具表）、`deny`（拦调用）、`block`（闸门拦截）、`grant`（临时收窄）、`reset`（复位）、`degrade`（降级）
+- 落盘 `~/.dsh/minimal-router/activity.jsonl`，**只留最近 200 条**，超过 256KB 自动重写尾部
+- 写盘失败只影响这条日志，不影响主流程
+
+### 新增 · `route_activity` 工具
+```
+route_activity()                    # 最近 20 条
+route_activity({ kind: "deny" })    # 只看被拦下的调用
+```
+返回 `summary`（人话汇总）+ `events`（最新在前）。`route_status` 里也带了 `activity` 与 `recentActivity`（最近 5 条），不调工具也能瞥一眼。
+
+### 重构
+- `DEFAULT_STAGES` / `STAGE_ORDER` 搬到 `lib/stages-default.js`（纯数据，让入口文件回到 1200 行守卫线内）
+- 工具表从 9 个变 11 个（新增 `route_use`、`route_hint`、`route_activity` 在文档里补齐）
+
+### 测试
+- 312 → **320**（activity 8）
+
+## [1.16.0] — 2026-10-31
+
+三个"更聪明"的能力，**全部零额外请求**（不调模型，不发第二遍上下文）。
+
+### 新增 · 语义打分路由（`lib/intent.js`）
+- 关键词没命中时，用本地字符统计（CJK 二元组 + 拉丁词）给每个阶段打画像分
+- **领先不够就返回 null**，退回"粘住当前阶段"——宁可不动，也不猜
+- 实测：`帮我把那个按钮挪一下` → `unity-ui`；`今天天气怎么样` → 不切
+- 配置：`intentRouting`（默认开）、`intentMinScore`、`intentMinMargin`
+
+### 新增 · 空转工具画像（`lib/usage.js`）
+- 记录每个工具被**真正调用**过几次（`~/.dsh/minimal-router/tool-usage.json`）
+- `route_status.toolUsage` 直接告诉你：有多少工具从装上到现在**一次都没用过**
+- 只给建议，不自动卸载（卸载是不可逆的跨项目操作）
+
+### 新增 · 自适应阶段（`lib/adaptive.js`，默认关闭）
+- 从**最近 20 次真实调用**里学：某组占 60% 以上且 ≥6 次，才在 auto 阶段提议切换
+- 仍要过成本闸门 + 迟滞（一次命中不会切）
+- 配置：`adaptiveStage`、`adaptiveWindow`、`adaptiveMinCalls`、`adaptiveMinShare`
+
+### 测试
+- 288 → **312**（intent 11 + usage 6 + adaptive 7）
+
 ## [1.15.1] — 2026-10-31
 
 把 1.15.0 留下的尾巴做完：**拦截 / 体检 / 熔断 / 降级的原因文案全部英文化**。

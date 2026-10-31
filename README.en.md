@@ -1,4 +1,4 @@
-# dsh-minimal-router · v1.15.1
+# dsh-minimal-router · v1.18.0
 
 [![Tests](https://github.com/qwq1223211/dsh-minimal-router/actions/workflows/test.yml/badge.svg)](https://github.com/qwq1223211/dsh-minimal-router/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
@@ -161,8 +161,23 @@ Then **Settings → Plugins → disable, then enable** the row (a linked install
 | `route_status()` | Current stage, tag census, guard state, unclaimed groups |
 | `route_reset()` | Back to `auto`, releases every restriction |
 | `route_init()` | Generate `custom_stages.sample.json` from **your** real tools |
+| `route_use(groups, turns?)` | Ad-hoc narrowing without any stage table |
+| `route_hint(enabled?)` | Turn the tail hint on/off for this session (A/B) |
+| `route_activity(limit?, kind?)` | **What it actually did**: switches, restrictions, denials, blocks |
 
 **`route_*` and `guard_*` are never blocked.** Escape hatches are a hard rule here.
+
+### "What did it actually do?" — `route_activity`
+
+`route_status` tells you the current state; `route_activity` tells you what happened.
+
+```
+route_activity()                       # last 20 events
+route_activity({ "kind": "deny" })     # only blocked tool calls
+```
+
+Seven kinds: `switch`, `restrict`, `deny`, `block`, `grant`, `reset`, `degrade`.
+Stored in `~/.dsh/minimal-router/activity.jsonl`, capped at the last 200 events, so it never grows into another thing to read.
 
 ## Default stages
 
@@ -387,10 +402,51 @@ if a service is missing, it degrades; on an exception it calls `next()`.
         contextGuardThreshold: 100000
 ```
 
+## Smarter routing (v1.16)
+
+Three additions, **all zero-request** — no extra model call, no second copy of the context.
+
+| Feature | Default | What it buys you |
+|---|---|---|
+| **Semantic scoring** (`lib/intent.js`) | on | Picks a stage even when no keyword matched (`"move that button"` → `unity-ui`) |
+| **Dead-tool profile** (`lib/usage.js`) | on | `route_status.toolUsage` tells you which tools were **never called** — i.e. which plugins you can uninstall |
+| **Adaptive stage** (`lib/adaptive.js`) | **off** | Learns from the last 20 real calls; proposes a switch only when one group hits ≥6 calls and ≥60% share |
+
+```yaml
+intentRouting: true
+intentMinScore: 2.0        # raise to be more conservative
+intentMinMargin: 0.25      # must lead the runner-up by 25%
+usageTracking: true
+adaptiveStage: false       # off by default: switching stages can force a full prefix rebuild
+adaptiveWindow: 20
+adaptiveMinCalls: 6
+adaptiveMinShare: 0.6
+```
+
+Semantic guesses go through the **same gates** as keywords (context guard → cost gate → cooldown), so a wrong guess cannot switch immediately. When unsure it returns `null` and the current stage stays put.
+
+## Proactive behaviour (v1.18)
+
+| Feature | Default | What it decides |
+|---|---|---|
+| **Smart trim** (`autoRestrictPolicy`) | on | Only physically trims when the rebuild pays back within `switchPaybackTurns` (default 3). A 500K-token session is told to keep the tools rather than burn 500K to save 26K/turn |
+| **Suggestion** | on | When the intent score is *close* but not enough, it does not switch — it appends one line to the tail hint: `Tip: looks like art; if so, route_use(["art"],3).` |
+| **Deny recovery** | on | Counts whether the model retries with another tool within 2 minutes after a denial. `route_status.denyRecovery` reports the rate, which tells you if the gate is too strict |
+
+```yaml
+autoRestrictPolicy: true   # explicit route_stage is never blocked by this
+```
+
+Tune against your own data (nothing leaves the machine):
+
+```
+node scripts/tune.mjs --days 7
+```
+
 ## Tests
 
 ```powershell
-node test/router.test.mjs   # 102 tests
+node --test test/*.test.mjs   # 312 tests
 ```
 
 Companion plugins: `dsh-cache-probe` (measures `cacheReadTokens` / prefix fingerprint) and `dsh-minimal-guard` (consecutive-error circuit breaker).

@@ -42,6 +42,22 @@ jobs:
       - name: probe
         run: node test/probe.test.mjs
 
+      # v1.16 的三个"更聪明"模块：语义打分 / 空转画像 / 自适应
+      - name: intent
+        run: node test/intent.test.mjs
+
+      - name: usage
+        run: node test/usage.test.mjs
+
+      - name: adaptive
+        run: node test/adaptive.test.mjs
+
+      - name: activity
+        run: node test/activity.test.mjs
+
+      - name: feedback
+        run: node test/feedback.test.mjs
+
       # 模糊测试：约 8400 个确定性随机输入，验证"绝不抛异常 + 不变量成立"
       - name: fuzz
         run: node test/fuzz.test.mjs

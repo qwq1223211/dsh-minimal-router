@@ -3,6 +3,24 @@
 All notable changes to `dsh-minimal-router`.
 Format: [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/).
 
+## [1.21.1] — 2026-11-08
+
+**把这一轮的新机制写进说明书。** 纯文档，不改行为。
+
+### Added —— `docs/RUNTIME.md` 两节
+
+| 小节 | 内容 |
+|---|---|
+| **§5.5 自动模式** | 模式文件、两套提示词（152 / 183 字，都 ≤200）、四条约束（读坏按 manual、5 秒缓存、只改提示、已定阶段不受影响），以及"提示词在缓存前缀之后，切模式不触发重建" |
+| **§5.6 UI 请求通道** | 徽章 → `request.json` → `tools/pre-execute` 消费 → `restrict()` → `request-result.json`；为什么必须是 pre-execute（唯一拿得到 `agent.ctx.tools` 的位置）；三条保护（过期不执行 / 同 id 只执行一次 / 失败写原因） |
+
+### Changed —— 数据文件表
+
+补了 5 个跨插件文件：`current.json`、`tool-registry.json`、`mode.json`、`request.json`、`request-result.json`，
+并标注每个文件由谁写、什么时候写。
+
+**全量 399 项通过**（文档改动不影响测试）。
+
 ## [1.21.0] — 2026-11-08
 
 **自动模式：让模型自己决定开哪些工具组。**

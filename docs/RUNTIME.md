@@ -124,8 +124,63 @@
 |---|---|---|
 | `~/.dsh/minimal-router/activity.jsonl` | 事件台账：`switch` / `block` / `deny` / `restrict` / `grant` / `reset` / `degrade` | 每次事件 append |
 | `~/.dsh/minimal-router/tool-usage.json` | 每个工具被调用过几次 | 4 秒节流落盘 |
-| `~/.dsh/minimal-router/usage.jsonl` | 探针账单（每次请求一条，含 token 与工具体积） | 每次模型请求 |
+| `~/.dsh/minimal-router/usage.jsonl` | 探针账单（每次请求一条，含 token、工具数与**阶段**） | 每次模型请求 |
 | `~/.dsh/minimal-router/custom_stages.json` | 你自己的阶段与认领 | **人写**，加载时读 |
+| `~/.dsh/task-guard/current.json` | 任务收窄快照（含 `keptTools` / `deniedTools`） | `task_start` / `task_end` |
+| `~/.dsh/task-guard/tool-registry.json` | **全量工具清单**（239 个），任务结束也不删 | `task_start`（含 dryRun） |
+| `~/.dsh/task-guard/mode.json` | `{"mode":"auto"\|"manual"}` —— **谁来决定工具表** | 徽章开关写入 |
+| `~/.dsh/task-guard/request.json` | UI 发来的手动动作（`start`/`end`/`mode`） | 徽章 POST 写入 |
+| `~/.dsh/task-guard/request-result.json` | 上一次动作的结果（成功/失败原因） | task-guard 消费后写 |
+
+---
+
+## 5.5 自动模式：谁来决定工具表（v1.21.0）
+
+"收窄"这件事有两个决策者，用 `mode.json` 切换：
+
+```
+徽章开关（自动/手动）
+      │ 写
+      ▼
+~/.dsh/task-guard/mode.json  {"mode":"auto"}
+      │ 读（5 秒缓存）
+      ▼
+本插件 → 换掉尾部提示 → 模型看到"你自己决定"
+```
+
+| 模式 | 尾部提示（≤200 字硬上限） | 谁动手 |
+|---|---|---|
+| `manual`（默认） | `[router] stage=auto …call route_stage("unity-ui").`（152 字） | 人点按钮 / 关键词切阶段 |
+| `auto` | `[router] auto mode: YOU decide the tool set. Narrow it with route_use({groups:["unity"]}) … All tools are available now.`（183 字） | **模型自己**调 `route_use` / `task_start` |
+
+**四条约束**
+
+1. 读不到或读坏 `mode.json` → 一律按 `manual`，**绝不会突然把控制权交给模型**
+2. 5 秒缓存：切换最多 5 秒后生效，避免每轮读盘
+3. 模式只改**提示词**，不强制任何行为——模型不调工具就什么都不变
+4. 已经定了阶段（`stage != auto`）时，两种模式的提示完全一致
+
+> 提示词在缓存前缀**之后**，所以切模式不会触发前缀重建。
+
+## 5.6 UI 请求通道（手动收窄怎么落到工具表上）
+
+浏览器调不了工具，所以徽章的动作走"文件邮箱"：
+
+```
+徽章面板 → POST /task-guard/action
+              │ 写 request.json {id, action, groups, ts}
+              ▼
+task-guard 在**下一次 tools/pre-execute** 里消费
+              │ require: 时间戳 < 60 秒、id 未被处理过
+              ▼
+         restrict({deny}) / dispose()  → 写 request-result.json
+```
+
+用 pre-execute 而不是定时器，是因为那是**唯一每轮都会发生、且能拿到
+`agent.ctx.tools` 作用域**的位置（`restrict()` 必须作用在 agent 作用域上）。
+
+消费端有三条保护：过期不执行、同一 id 只执行一次、失败把原因写进结果文件
+（UI 上显示"上一次动作：end ✗ 当前会话没有进行中的任务"）。
 
 ---
 

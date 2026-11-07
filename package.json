@@ -1,7 +1,6 @@
 {
-  "name": "@local/dsh-minimal-router",
+  "name": "dsh-minimal-router",
   "version": "1.21.1",
-  "private": true,
   "type": "module",
   "main": "./index.js",
   "description": "Everything-in-one DSH toolkit: stage-based tool routing (auto-classify, tail hint, physical trimming), consecutive-error circuit breaker, and a cache probe that measures the real bill. One install, one reload, one config.",
@@ -36,5 +35,22 @@
     "LICENSE",
     "custom_stages.sample.json",
     "examples/*.json"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/qwq1223211/dsh-minimal-router.git"
+  },
+  "homepage": "https://github.com/qwq1223211/dsh-minimal-router#readme",
+  "bugs": {
+    "url": "https://github.com/qwq1223211/dsh-minimal-router/issues"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "tools",
+    "context-cache",
+    "router",
+    "token-saver"
   ]
 }

@@ -45,7 +45,7 @@ node scripts/lint.mjs         # 仓库自检（编码、结构、体积）
 放 `examples/<name>.json`，然后 `node scripts/lint.mjs` 会确认它被 `package.json` 的
 `files` 覆盖到；用 `route_init({"preset":"<name>"})` 就能测。
 
-## 包名为什么是 `@local/dsh-minimal-router`
+## 包名为什么是 `dsh-minimal-router`
 
 不是随手起的，也不是"没发布"的意思：
 

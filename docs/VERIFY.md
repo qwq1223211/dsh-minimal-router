@@ -37,7 +37,7 @@ dsh plugin --profile fresh add github:qwq1223211/dsh-minimal-router
 ## A. 自动安装（干净 profile）
 
 > **已在本机真实验证过一次（v1.12.0）**：全新 profile + `dsh plugin add github:...`，
-> 装出来是 `node_modules/@local/dsh-minimal-router` 这个 **34 个文件的真实目录**（不是 link），
+> 装出来是 `node_modules/dsh-minimal-router` 这个 **34 个文件的真实目录**（不是 link），
 > profile 的 `package.json` 自动加上了依赖**和** `dsh.profile.bundles` 条目，
 > 探针数据/阶段表都在 `~/.dsh/minimal-router/`（包外），`apply` 不往包里写任何文件，注册 10 个工具。
 >

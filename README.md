@@ -98,7 +98,7 @@ dsh plugin --profile desktop add github:qwq1223211/dsh-minimal-router
 > **adds the package to that profile's `dsh.profile.bundles`** and initialises the profile if needed.
 >
 > **Verified** (v1.12.0, brand-new profile): the install lands as a **real directory** of 34 files at
-> `node_modules/@local/dsh-minimal-router` (not a link), and the profile's `package.json` gains both the
+> `node_modules/dsh-minimal-router` (not a link), and the profile's `package.json` gains both the
 > dependency and the bundle entry. So normally you do **not** need to enable anything by hand — just go to
 > Settings → Plugins and toggle the row off/on.
 
@@ -416,7 +416,7 @@ if a service is missing, it degrades; on an exception it calls `next()`.
 ```yaml
 - insert:
     - id: minimal-router
-      name: '@local/dsh-minimal-router'
+      name: 'dsh-minimal-router'
       config:
         defaultStage: auto
         enforceStage: true

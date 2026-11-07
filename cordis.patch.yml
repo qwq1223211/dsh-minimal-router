@@ -2,7 +2,7 @@
 # 顶层必须是数组；新增插件写 - insert: 再挂一个列表。
 - insert:
     - id: minimal-router
-      name: '@local/dsh-minimal-router'
+      name: 'dsh-minimal-router'
       config:
         # ======================================================================
         # 模块开关（高级用户可以单独裁掉某一块，不用拆包）

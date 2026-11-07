@@ -47,7 +47,7 @@ export { STATE_DIR, collectStrings, pickProbeDataFile }
 import { estimateSwitchEconomy, decideByEconomy, describeEconomy, measureDeniedBytes } from './lib/cost.js'
 import { registerDynamicTools } from './lib/tools-dynamic.js'
 import { renderHint, HINT_LIMIT } from './lib/prompt.js'
-import { scanCode, formatFindings } from './lib/lint.js'
+import { decideLint, LINT_WARN_TOOLS } from './lib/lint.js'
 import { resolveCapability, formatDegradeWarning } from './lib/model-guard.js'
 // ---- 同包的两个模块：熔断器 + 缓存探针 ----
 // 它们各自是独立的 apply 函数，工具名互不冲突（guard_* / cache_probe_* / route_*）
@@ -149,6 +149,8 @@ const CONFIG_DEFAULTS = {
     'guard_status',
     'guard_reset',
   ],
+  // 【修改这里】★ 这些工具的命中也只警告、不拦：它们的参数是"文件内容"，不是要执行的命令
+  lintWarnTools: [...LINT_WARN_TOOLS],
   // 【修改这里】单个参数文本的最大扫描长度
   lintMaxArgChars: 200000,
   // 【修改这里】最多记住多少个会话的阶段状态
@@ -229,10 +231,6 @@ const CONFIG_DEFAULTS = {
   guard: {},
   probe: {},
 }
-
-// 【修改这里】短于这个长度的字符串不送去体检。
-// 别设太大：`while(true){}` 只有 13 个字符，设成 20 就会漏掉最短的死循环（实测踩过）。
-const MIN_SCAN_CHARS = 8
 
 /** 兜底空流：只在瀑布里拿不到下游 next 时使用，保证不抛错 */
 async function* emptyStream() {}
@@ -382,6 +380,7 @@ export function normalizeConfig(raw = {}) {
     warnOnDegrade: src.warnOnDegrade !== false,
     lintMode: mode === 'warn' || mode === 'off' ? mode : 'deny',
     lintSkipTools: Array.isArray(src.lintSkipTools) ? src.lintSkipTools.filter((x) => typeof x === 'string') : [...CONFIG_DEFAULTS.lintSkipTools],
+    lintWarnTools: Array.isArray(src.lintWarnTools) ? src.lintWarnTools.filter((x) => typeof x === 'string') : [...CONFIG_DEFAULTS.lintWarnTools],
     lintMaxArgChars: Number.isFinite(Number(src.lintMaxArgChars)) ? Math.max(2000, Math.trunc(Number(src.lintMaxArgChars))) : CONFIG_DEFAULTS.lintMaxArgChars,
     maxSessions: Number.isFinite(Number(src.maxSessions)) ? Math.max(1, Math.trunc(Number(src.maxSessions))) : CONFIG_DEFAULTS.maxSessions,
   }
@@ -1348,24 +1347,15 @@ export function apply(ctx, config = {}) {
 
       // 逃生门：永远放行，连体检都不做（否则逃生门自己也可能被拦）
       if (!ALWAYS_ALLOW.includes(toolName)) {
-        // ---- 5.1 本地体检 ----
-        if (cfg.lintMode !== 'off' && toolName && !skipLint.has(toolName)) {
-          const texts = collectStrings(exec && exec.arguments, { maxChars: cfg.lintMaxArgChars })
-          for (const text of texts) {
-            if (text.length < MIN_SCAN_CHARS) continue
-            const { findings } = scanCode(text)
-            const blocks = findings.filter((f) => f.severity === 'block')
-            if (blocks.length === 0) continue
-            const reason = formatFindings(blocks, `工具 ${toolName}`)
-            lastLintHit = reason
-            if (cfg.lintMode === 'deny') {
-              activity.log('deny', { by: 'lint', tool: toolName })
-              return { kind: 'deny', reason, info: { name: 'minimal-router', code: 'LINT_DEAD_LOOP' } }
-            }
-            // warn 模式：只记不拦
-            console.warn(`[minimal-router] ${reason}`)
-            break
+        // ---- 5.1 本地体检（决策在 lib/lint.js；内容型工具只 warn 不拦）----
+        if (cfg.lintMode !== 'off' && toolName) {
+          const lintVerdict = decideLint({ toolName, args: exec && exec.arguments, mode: cfg.lintMode, skipTools: skipLint, warnTools: cfg.lintWarnTools, maxArgChars: cfg.lintMaxArgChars })
+          if (lintVerdict.action !== 'allow') lastLintHit = lintVerdict.reason
+          if (lintVerdict.action === 'deny') {
+            activity.log('deny', { by: 'lint', tool: toolName })
+            return { kind: 'deny', reason: lintVerdict.reason, info: { name: 'minimal-router', code: lintVerdict.code } }
           }
+          if (lintVerdict.action === 'warn') console.warn(`[minimal-router] ${lintVerdict.reason}`)
         }
 
         // ---- 5.2 阶段越界 ----

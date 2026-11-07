@@ -3,6 +3,51 @@
 All notable changes to `dsh-minimal-router`.
 Format: [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/).
 
+## [1.19.6] — 2026-11-07
+
+**修一个真误拦，并顺手修正一个我上一轮引入的回归。**
+
+### Fixed —— 体检不再拦内容型工具（真机证据：66 次误拦）
+
+`route_status` 旁边的活动日志（`activity.jsonl`）里，198 次 `deny` 只有 3 个工具：
+
+| 工具 | 次数 | 来源 | 是否合理 |
+|---|---|---|---|
+| unity_object_create | 99 | by=stage | ✅ 合理（在 art/core 阶段） |
+| meshy_image_to_3d | 33 | by=stage | ✅ 合理（在非 art 阶段） |
+| **write** | **66** | **by=lint** | ❌ **误拦** |
+
+66 次全部发生在 2026-10-31 同一天，原因：`write` / `edit` 的参数就是**文件内容**，
+而体检把"写入内容里的循环"当成"即将执行的死循环"。写一个合法的无限循环
+（游戏主循环、守护进程、事件循环）会被**拒绝写入**。
+
+**改法（方案 C）**：把决策从 index.js 搬进 `lib/lint.js` 的新函数 `decideLint()`，支持按工具分级：
+
+- 内容型工具（`write` / `edit`，见 `LINT_WARN_TOOLS`）→ 只 `warn`，照常写入
+- 执行型工具（`pwsh` / `terminal` / `python`）→ 仍然 `deny`（保护没丢）
+- `skipTools` / `mode=off` 语义不变
+
+顺带的好处：决策可以单测，不需要起插件；`index.js` **1197 → 1190（净减 7 行）**。
+
+### Fixed —— 我上一轮把 tool-inventory 弄挂了（回归）
+
+`_tools/manage-plugins.mjs` 给 5 个包补 `exports` 时，把 `main: "index.js"` 原样写成
+`exports["."] = "index.js"`。Node 要求以 `./` 开头，于是：
+
+```
+tool-inventory-v5: failed to import: Invalid "exports" main target "index.js"
+```
+
+**tool_inventory 的三个工具因此加载失败。** 已修包内 `exports` 为 `"./index.js"`，
+并在脚本里加了归一化（不以 `./` 开头就补上），避免以后再犯。
+
+### Tests
+
+- 新增 `test/lint-decide.test.mjs`（9 条）：write/edit → warn、pwsh → deny、有 break 放行、skip/off/warn 模式、空参数
+- `router.test.mjs` 的旧断言（write 被拦）改为新契约，并新增一条"同一段代码交给 pwsh 仍被拦"
+
+**全量 380 项通过**（370 → 380）。
+
 ## [1.19.5] — 2026-10-31
 
 **真机验收抓到的自违规修复。** v1.19.4 的施工单里写着"byTag 不写入 route_status 输出"，

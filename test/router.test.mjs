@@ -701,17 +701,31 @@ await test('集成 —— 逃生门：被阶段拦住时 route_reset 仍然可�
   assertEqual(after.kind, 'allow', '复位后应恢复放行')
 })
 
-await test('集成 —— 体检：写进死循环代码被当场拦住', async () => {
+// 【v1.19.6】内容型工具不再被拦：write 的参数是文件内容，不是要执行的命令。
+// 真机数据：10-31 一天里这个误拦发生了 66 次（全部是合法循环被当成死循环）。
+// 致命代码用拼接构造，避免本文件保存时被自己的体检命中。
+const DEAD_LOOP_CODE = ['void Update() { while', ' (', 'true', ') { Spin(); } }'].join('')
+
+await test('集成 —— 体检：write 里的死循环只警告、不再拦（v1.19.6 修正）', async () => {
   const rt = makeFakeCtx()
   apply(rt.ctx, {})
   const agent = { id: 'session-A' }
   const decision = await preExecute(rt, {
     name: 'write',
-    arguments: { file_path: 'C:/x.cs', content: 'void Update() { while (true) { Spin(); } }' },
+    arguments: { file_path: 'C:/x.cs', content: DEAD_LOOP_CODE },
     agent,
   })
+  assertEqual(decision.kind, 'allow')
+})
+
+await test('集成 —— 体检：同一段代码交给 pwsh 执行仍然被拦（保护还在）', async () => {
+  const rt = makeFakeCtx()
+  apply(rt.ctx, {})
+  const agent = { id: 'session-A' }
+  // 用 PowerShell 的恒真写法：没有引号包裹，去噪不会把它抹掉
+  const command = ['while', ' (', '$true', ') { Spin-Thing }'].join('')
+  const decision = await preExecute(rt, { name: 'pwsh', arguments: { command }, agent })
   assertEqual(decision.kind, 'deny')
-  assert(decision.reason.includes('[local lint]'))
   assertEqual(decision.info.code, 'LINT_DEAD_LOOP')
 })
 

@@ -3,6 +3,40 @@
 All notable changes to `dsh-minimal-router`.
 Format: [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/).
 
+## [1.21.0] — 2026-11-08
+
+**自动模式：让模型自己决定开哪些工具组。**
+
+### 背景
+
+之前"工具表由谁决定"是固定的：阶段切换按关键词、收窄靠人手动点。
+但很多时候**只有模型自己知道**下一步需不需要 Unity 那 26 个工具——
+与其让它撞一次 out-of-stage，不如把决定权直接给它。
+
+### Added —— 模式文件 + 两套提示词
+
+新增 `~/.dsh/task-guard/mode.json`（由徽章开关写入，路由器读取，5 秒缓存）：
+
+| 模式 | 尾部提示（≤200 字硬上限） |
+|---|---|
+| `manual`（默认） | `[router] stage=auto (all tools available). …call route_stage("unity-ui").`（152 字） |
+| `auto` | `[router] auto mode: YOU decide the tool set. Narrow it with route_use({groups:["unity"]}) for a few turns, or task_start({groups:[...]}) for a whole task. All tools are available now.`（183 字） |
+
+自动模式下模型会主动调用 `route_use`（按轮数临时收窄）或 `task_start`（任务级收窄），
+而不是被动等你点按钮。**读不到模式文件一律当 manual**——保守，不会突然把控制权交出去。
+
+### 设计取舍
+
+- 模式文件放在 `~/.dsh/task-guard/`，让**徽章（写）和路由器（读）共享同一个开关**，不需要 IPC。
+- 5 秒缓存：切换模式后最多 5 秒生效，避免每次请求都读盘。
+- 提示词仍然受 200 字硬上限约束，两版都实测未截断。
+
+### Tests
+
+新增 `test/prompt.test.mjs`（4 条）：两版文案不同、都 ≤200 字、都是单行、已定阶段时两模式一致。
+
+**全量 399 项通过**（395 → 399）。
+
 ## [1.20.0] — 2026-11-08
 
 **探针开始按阶段算账：终于能回答"这个阶段到底省了多少"。**

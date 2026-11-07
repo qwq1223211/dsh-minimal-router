@@ -1,6 +1,6 @@
 {
   "name": "dsh-minimal-router",
-  "version": "1.21.1",
+  "version": "1.21.2",
   "type": "module",
   "main": "./index.js",
   "description": "Everything-in-one DSH toolkit: stage-based tool routing (auto-classify, tail hint, physical trimming), consecutive-error circuit breaker, and a cache probe that measures the real bill. One install, one reload, one config.",

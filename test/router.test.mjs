@@ -2321,7 +2321,7 @@ await test('P2 基线：各省钱阶段的字节削减不得低于记录值（�
 // ============================================================================
 // 10.22 不许再引入"假可见数"（三轮 A/B 抓到的第二种谎报）
 // ============================================================================
-await test('可见数：不再对外报"还剩多少"，只留估算 + 指向探针', async () => {
+await test('可见数：两个"看起来更准"的估算都删掉了，只留我们自己的决定 + 指向探针', async () => {
   const rt = makeFakeCtx()
   apply(rt.ctx, { enforceByRestrict: true })
   const agent = rt.makeAgent('vis-1')
@@ -2329,10 +2329,26 @@ await test('可见数：不再对外报"还剩多少"，只留估算 + 指向探
   const status = await rt.tools.get('route_status').execute({}, { agent })
 
   // 三轮 A/B 实测：减法估报 38、scoped schemas 报 138、请求里实际是 72。
-  // 两个"看起来更准"的数都是错的，所以它们都不该再出现。
+  // 【v1.19.9】estimatedAdvertised 也删了：它按"注册数 − deny"算，和真实值差 31 个
+  // （base/作用域工具），留着只会误导人。要看真实数字只能看探针。
   assertEqual(status.advertisedAfterRestrict, undefined, 'scoped schemas 不反映限制，不许再报')
-  assertEqual(typeof status.estimatedAdvertised, 'number', '保留估算值，但字段名必须带 estimate')
+  assertEqual(status.estimatedAdvertised, undefined, '减法估算也是错的，已删除')
+  assertEqual(typeof status.toolCount, 'number', '注册数可以报（它是什么就是什么）')
   assertEqual(status.restrictedToolCount > 0, true, '摘掉了多少是可以报的（这是我们自己的决定）')
+})
+
+await test('compact 模式：只回关键指标，不把 4K token 的完整状态抛出来', async () => {
+  const rt = makeFakeCtx()
+  apply(rt.ctx, { enforceByRestrict: true })
+  const agent = rt.makeAgent('vis-2')
+  await rt.tools.get('route_stage').execute({ stage: 'core' }, { agent })
+  const compact = await rt.tools.get('route_status').execute({ compact: true }, { agent })
+  assertEqual(compact.stage, 'core')
+  assertEqual(typeof compact.toolCount, 'number')
+  assertEqual(typeof compact.restrictedToolCount, 'number')
+  assertEqual(compact.stages, undefined, 'compact 不该带完整阶段表')
+  assertEqual(compact.unclaimedTags, undefined, 'compact 不该带未认领清单')
+  assertEqual(compact.switchEconomics, undefined, 'compact 不该带经济账')
 })
 
 // ============================================================================

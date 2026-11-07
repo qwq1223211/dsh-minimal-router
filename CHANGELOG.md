@@ -3,6 +3,40 @@
 All notable changes to `dsh-minimal-router`.
 Format: [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/).
 
+## [1.19.9] — 2026-11-07
+
+**把运行时可观测性补齐。8 项改进，全部来自 2,809 条活动日志 + 21 个历史会话的实测。**
+
+### P0 —— 让已有数据变得可用
+
+| 改进 | 改前 | 改后 |
+|---|---|---|
+| 探针记阶段 | 17/17 条记录 `stage: "n/a"` | 新增 `lib/live.js`（会话→阶段共享表），探针按会话哈希查；实测可读到 `unity-ui` |
+| 切换记触发词 | 只有 `by:"keyword"` | 新增 `kw`（命中的词）+ `s`（会话哈希）；新增 `matchedKeyword()` |
+| degrade 去重 | 同一条原因被写 287 次（占全部事件 10%） | 按 `(model, reason)` 每个进程只记一次 |
+
+### P1 —— 减少误判与误导
+
+- **`art` 词表去掉裸词 `model`**：它在开发语境里太常见（"数据模型"/"model 层"），一命中就切美术阶段 = 一次前缀重建。中文"模型"保留。
+- **删除 `estimatedAdvertised`**：它按"注册数 − deny"算，和真实值差 31 个（base/作用域工具），留着只会误导。要看真实数字只能用探针。
+
+### P2 —— 体验与整洁
+
+- **`route_status({ compact: true })`**：完整输出约 4K token，compact 只回 `stage/by/toolCount/restrictedToolCount/unionEnabled`。
+- **探针跨轮转读取**：当前文件不够时自动读 `usage.jsonl.1`（实测 `.1` 里有 5,462 条、2.1 MB 历史，原来完全读不到）；`count()` 同样合并。
+- **`lib/union.js` 标记 `@deprecated`**：按 ROADMAP 的"先废弃、后删除"，下一版可删（连带两个测试文件）。
+
+### 数据依据（7 天台账）
+
+```
+switch 313 次：auto→art 289 / auto→document-write+python-code 24
+  其中 278 次（89%）集中在 11 个 5 分钟窗口 → 压测/实验，不是真实使用
+deny   238 次：lint/write 66（已修）、unity_object_create 123、meshy 41
+degrade 287 次：全是同一句 deepseek-v4-pro leading-only
+```
+
+**全量 392 项通过**（382 → 392，新增 `test/live.test.mjs` 9 条 + compact 1 条）。
+
 ## [1.19.8] — 2026-11-07
 
 **把运行逻辑写进说明书。** 纯文档，不改行为。

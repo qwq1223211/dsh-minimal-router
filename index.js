@@ -33,7 +33,8 @@ import {
   suggestStageForTag,
   tagBytesOf,
 } from './lib/classify.js'
-import { createStageState, textOfMessage, detectStage, isExplicitSwitch, createSwitchArbiter } from './lib/stage.js'
+import { createStageState, textOfMessage, detectStage, isExplicitSwitch, createSwitchArbiter, matchedKeyword } from './lib/stage.js'
+import { noteStage, hashOf } from './lib/live.js'
 import { setUnionEnabled } from './lib/union.js'
 import { createIntentDetector } from './lib/intent.js'
 import { createUsageTracker } from './lib/usage.js'
@@ -486,6 +487,9 @@ export function apply(ctx, config = {}) {
   const contextWarned = new Set()
   // 最近一次被拦下的切换（route_status 里展示，方便排查"为什么阶段没变"）
   let lastBlockedSwitch = null
+// 降级原因去重：同一个 (模型, 原因) 每个进程只记一次。
+// 【实测】287 条 degrade 事件全是同一句 "deepseek-v4-pro leading-only"，占全部事件 10%。
+const degradeSeen = new Set()
   // 迟滞仲裁器：抑制"顺嘴提一句就切阶段"的抖动
   const switchArbiter = createSwitchArbiter({
     confirmations: cfg.switchConfirmations,
@@ -564,6 +568,8 @@ export function apply(ctx, config = {}) {
    */
   function refreshRestriction(key, agentHint) {
     if (agentHint && typeof agentHint === 'object') rememberAgent(agentHint)
+    // 【探针归因】把"这个会话现在处于哪个阶段"记进共享状态，探针落盘时读它
+    noteStage(key, (state.get(key) || {}).stage)
     if (!cfg.enforceByRestrict) return { applied: false, reason: 'disabled' }
 
     let stage = 'auto'
@@ -800,7 +806,11 @@ export function apply(ctx, config = {}) {
     if (!cap.safe) {
       // 降级：把已经挂上的物理限制全部拆掉
       dropRestrictions('degraded')
-      activity.log('degrade', { model: model || '?', reason: cap.reason })
+      const degradeKey = `${model || '?'}|${cap.reason || ''}`
+      if (!degradeSeen.has(degradeKey)) {
+        degradeSeen.add(degradeKey)
+        activity.log('degrade', { model: model || '?', reason: cap.reason })
+      }
     }
 
     const key = `${provider || '?'}/${model || '?'}/${cap.safe ? 'ok' : 'degraded'}`
@@ -983,9 +993,9 @@ export function apply(ctx, config = {}) {
       name: 'route_status',
       description:
         'Read the router state: current stage, available stages, tool-group distribution, the last lint hit, and whether trimming is actually effective. Read-only.',
-      parameters: { type: 'object', additionalProperties: false, properties: {} },
+      parameters: { type: 'object', additionalProperties: false, properties: { compact: { type: 'boolean' } } },
       output: RENDER,
-      async execute(_args, exec) {
+      async execute(args, exec) {
         const key = keyOf(exec)
         const snapshot = state.get(key)
         let catalog = { tags: {}, total: 0 }
@@ -1006,6 +1016,8 @@ export function apply(ctx, config = {}) {
         const denyCount = (restrictions.get(key) || {}).denyCount || 0
         // 【认领判据】用量画像提前算一次：unclaimedTags 与 toolUsage 两处共用同一份
         const toolUsage = cfg.usageTracking ? usage.summarize(registeredNames, (n) => tagOf(n, cfg.coreTools)) : null
+        // 【compact】只要几个关键指标时用：完整输出 ~4K token，这个只有几十个
+        if (args && args.compact === true) return { stage: snapshot.stage, by: snapshot.by, toolCount: catalog.total, restrictedToolCount: denyCount, unionEnabled: cfg.unionEnabled }
         return {
           stage: snapshot.stage,
           by: snapshot.by,
@@ -1026,11 +1038,8 @@ export function apply(ctx, config = {}) {
           registeredToolCount: catalog.total,
           // 本阶段被物理摘掉多少个
           restrictedToolCount: denyCount,
-          // 【别再信减法，也别信 scoped schemas】注册数 − 摘掉的数只是估算：
-          // deny 按本会话注册表算，restrict() 却作用在更大的共享表上（实测 38 vs 72）。
-          // 而 restrict 之后重新读 scopedTools.schemas() 仍然是 138 —— 那个接口不反映限制。
-          // 所以"到底发出去多少个"只有 cache_probe_report 的 tools/toolsChars 是权威的。
-          estimatedAdvertised: Math.max(0, catalog.total - denyCount),
+          // [已删除 estimatedAdvertised] 它按"注册数 − deny 数"算，和真实发出的工具差 31 个
+          // （base/作用域工具），只会误导人。要看真实数字请用 cache_probe_report 的 tools/toolsChars。
           // [已删除] advertisedAfterRestrict：三轮 A/B 实测证明它报 138 而实际是 72，会误导人。
           tagCounts: catalog.tags,
           // 还没被任何阶段管的工具组（新装的插件会出现在这里；它们目前永远放行）
@@ -1333,6 +1342,8 @@ export function apply(ctx, config = {}) {
     try {
       const toolName = exec && typeof exec.name === 'string' ? exec.name : ''
       const denyKey = keyOf(exec)
+      // 【探针归因】顺带把当前阶段同步给共享状态（切阶段后没人调工具也不会漏）
+      noteStage(denyKey, (state.get(denyKey) || {}).stage)
 
       // ---- 5.0 使用画像：记一次真实调用（空转工具画像的唯一数据源）----
       if (cfg.usageTracking && toolName) usage.record(toolName)
@@ -1519,6 +1530,9 @@ export function apply(ctx, config = {}) {
           from: current,
           to: detected,
           by: keywordStage ? 'keyword' : lastAdaptive ? 'adaptive' : 'intent',
+          // 记下"到底是哪个词触发的"和"哪个会话"——否则日志只能回答"切了"，答不了"为什么"
+          kw: keywordStage ? matchedKeyword(text, detected, cfg.stages) : '',
+          s: hashOf(key),
         })
         feedback.clearSuggestion(key)
         switchArbiter.noteSwitched({ key })

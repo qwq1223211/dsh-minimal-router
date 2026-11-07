@@ -3,6 +3,37 @@
 All notable changes to `dsh-minimal-router`.
 Format: [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/).
 
+## [1.19.8] — 2026-11-07
+
+**把运行逻辑写进说明书。** 纯文档，不改行为。
+
+### Added —— `docs/RUNTIME.md`
+
+按代码逐段核实的运行时手册，回答"它运行时到底做了什么、什么顺序"：
+
+| 章节 | 内容 |
+|---|---|
+| 启动时 | `apply()` 的 7 步：配置归一化 → 并集开关 → 阶段表三层合并 → Proxy 包装 → 注册 11 个工具 → 挂 3 个模块 → 挂 4 个钩子 |
+| 用户发消息 | 四道闸门的**代码顺序**：上下文（10 万）→ 回本（≤3 轮）→ 迟滞（2 次确认 + 60s）→ 应用；以及各自的例外（`force:true`、显式切换） |
+| 每次工具调用 | `pre-execute` 的 6 步：逃生门 → 使用画像 → 体检 → 阶段越界 → 反馈闭环 → 异常放行 |
+| 判定顺序 | `decideOutOfStage` 的 6 条规则，含"`auto` 不裁剪"是 `stage === 'auto'` 特判（**不是**"allow 为空"）这一易错点 |
+| 收窄落地 | 为什么只用 `deny` 不用 `allow`（allow 会隐藏 `read`/`write`，实测 4/4 会话丢失），`run_code` 例外，失败即降级 |
+| 数据文件 | 4 个文件的内容与写入时机 |
+| 默认值表 | 15 项关键配置的默认值（含 `enforceByRestrict` 仓库默认 `false`、本机 profile 开 `true`） |
+| 降级路径 | 模块加载失败 / restrict 不可用 / 模型不支持 in-history / 钩子抛错 → 各自的表现 |
+| 三个口径 | `registeredToolCount` / `estimatedAdvertised` / 探针 `tools` 为什么差 31 个，做对比只用探针 |
+
+### Changed
+
+三个 README 的**首屏**都加了「它怎么跑的（简版）」：两个入口、四道闸门、6 步判定、安全网，并链到 `docs/RUNTIME.md`。
+
+### 顺带更正一处说法
+
+`task_*` 工具**不在** `ALWAYS_ALLOW` 里。它永远可用是因为**未认领标签默认放行**（`decideOutOfStage` 第 5 条），
+不是逃生门——两种机制效果相同但原因不同，说明书里已经写清。
+
+**全量 382 项通过。**
+
 ## [1.19.7] — 2026-11-07
 
 **成本模型按真机实测校准：一次性支出要按"收窄后"的上下文算。**

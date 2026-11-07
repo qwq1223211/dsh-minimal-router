@@ -1,4 +1,4 @@
-# dsh-minimal-router · v1.19.7
+# dsh-minimal-router · v1.19.8
 
 [![Tests](https://github.com/qwq1223211/dsh-minimal-router/actions/workflows/test.yml/badge.svg)](https://github.com/qwq1223211/dsh-minimal-router/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
@@ -6,6 +6,17 @@
 [![Tools](https://img.shields.io/badge/tools%20per%20request-165%20%E2%86%92%2066-orange)](#numbers-same-machine-same-model-measured-with-dsh-cache-probe)
 
 > **Give the model only the tools it needs right now.** Fixed prefix, variable tail.
+
+## How it runs (short version)
+
+Two entry points, everything else is bookkeeping:
+
+- **`agent/inbox/claimed`** (user message) → detect stage → four gates: **context size** (100k) → **cost payback** (≤3 turns) → **hysteresis** (2 confirmations, 60s cooldown) → apply → `restrict({ deny })`
+- **`tools/pre-execute`** (before every call) → `ALWAYS_ALLOW` → lint → out-of-stage check → allow / deny. Any plugin exception **allows** the call.
+
+Untouched tags are never trimmed; `auto` never trims; only an explicit `strict: true` overrides that.
+
+📖 Full runtime logic, data files, defaults, degradation: **[docs/RUNTIME.md](./docs/RUNTIME.md)**
 
 ## 30 seconds
 

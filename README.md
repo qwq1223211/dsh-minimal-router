@@ -1,4 +1,4 @@
-# dsh-minimal-router · v1.19.7
+# dsh-minimal-router · v1.19.8
 
 [![Tests](https://github.com/qwq1223211/dsh-minimal-router/actions/workflows/test.yml/badge.svg)](https://github.com/qwq1223211/dsh-minimal-router/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
@@ -6,6 +6,28 @@
 [![Tools](https://img.shields.io/badge/tools%20per%20request-165%20%E2%86%92%2066-orange)](#numbers-same-machine-same-model-measured-with-dsh-cache-probe)
 
 > **Give the model only the tools it needs right now.** Fixed prefix, variable tail.
+
+## How it runs (the 30-second version)
+
+Two entry points, everything else is bookkeeping:
+
+| When | Hook | What happens |
+|---|---|---|
+| A user message arrives | `agent/inbox/claimed` | detect the stage → **4 gates**: context size → cost payback → hysteresis → apply → `restrict()` |
+| Before every tool call | `tools/pre-execute` | always-allow list → lint → out-of-stage check → allow / deny |
+
+**The four gates** (in code order; the first one that fires ends the round):
+
+1. **Context gate** — over `contextGuardThreshold` (100k) any automatic switch is refused (`force: true` still works)
+2. **Cost gate** — `payback > switchPaybackTurns` (3) → refuse; explicit switches skip this
+3. **Hysteresis** — 2 confirmations + 60s cooldown before a switch sticks
+4. **Apply** — `applyStage()` → `refreshRestriction()` → `agent.ctx.tools.restrict({ deny })`
+
+**The per-call chain**: `ALWAYS_ALLOW` → lint (`decideLint`) → `decideOutOfStage` → allow/deny. Any exception inside the plugin **allows** the call.
+
+**Untouched tags are never trimmed** (the safety net for new plugins); `auto` never trims; only an explicit `strict: true` on a stage can override that.
+
+📖 Full runtime logic, data files, defaults and degradation paths: **[docs/RUNTIME.md](./docs/RUNTIME.md)**
 
 ## 30 seconds
 

@@ -1,4 +1,4 @@
-# 极简路由（dsh-minimal-router）· v1.19.7 · 小白版说明
+# 极简路由（dsh-minimal-router）· v1.19.8 · 小白版说明
 
 [![Tests](https://github.com/qwq1223211/dsh-minimal-router/actions/workflows/test.yml/badge.svg)](https://github.com/qwq1223211/dsh-minimal-router/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
@@ -6,6 +6,17 @@
 [![Tools](https://img.shields.io/badge/tools%20per%20request-165%20%E2%86%92%2066-orange)
 
 > 一句话：**让 AI 一次只看见它当前需要的工具，看不见的就不花钱。**
+
+## 它怎么跑的（简版）
+
+只有两个入口，其余都是记账：
+
+- **用户发消息时**（`agent/inbox/claimed`）→ 判阶段 → 过四道闸门：**上下文大小**（10 万）→ **回本收益**（≤3 轮）→ **迟滞确认**（2 次 + 60 秒冷却）→ 应用 → `restrict({ deny })`
+- **每次工具调用前**（`tools/pre-execute`）→ 逃生门 → 体检 → 阶段越界 → 放行/拒绝。插件内部一旦抛错就**放行**。
+
+未被认领的标签永不被裁；`auto` 阶段永不裁；只有阶段显式写 `strict: true` 才会例外。
+
+📖 完整运行逻辑（时序、数据文件、默认值、降级路径）：**[docs/RUNTIME.md](./docs/RUNTIME.md)**
 
 ## 30 秒看懂
 

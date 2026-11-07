@@ -520,6 +520,38 @@ await test('配置：脏数据自动回退，且默认落盘路径是插件目�
 })
 
 // ============================================================================
+// v1.20.0：按阶段聚合
+// ============================================================================
+await test('summarize：byStage 按阶段聚合次数/工具数/命中率', () => {
+  const records = [
+    { stage: 'auto', tools: 274, toolsChars: 240981, promptTokens: 100, cacheReadTokens: 98, hitRate: 0.98, prefixSig: 'a' },
+    { stage: 'auto', tools: 274, toolsChars: 240981, promptTokens: 100, cacheReadTokens: 99, hitRate: 0.99, prefixSig: 'a' },
+    { stage: 'unity-ui', tools: 176, toolsChars: 124171, promptTokens: 50, cacheReadTokens: 40, hitRate: 0.8, prefixSig: 'b' },
+  ]
+  const s = summarize(records)
+  assertEqual(s.byStage.length, 2, '两个阶段')
+  assertEqual(s.byStage[0].stage, 'auto', '按次数降序')
+  assertEqual(s.byStage[0].count, 2)
+  assertEqual(s.byStage[0].tools, 274)
+  assertEqual(s.byStage[0].hitRate, 0.985, '按 token 加权算命中率')
+  assertEqual(s.byStage[1].tools, 176)
+  assertEqual(s.byStage[1].toolsChars, 124171)
+})
+
+await test('summarize：没有记录时 byStage 是空数组（不是 undefined）', () => {
+  const s = summarize([])
+  assert(Array.isArray(s.byStage), '必须是数组')
+  assertEqual(s.byStage.length, 0)
+  assertEqual(JSON.stringify(JSON.parse(JSON.stringify(s))), JSON.stringify(s), '必须是无损 JSON')
+})
+
+await test('summarize：旧记录没有 stage 时归到 n/a', () => {
+  const s = summarize([{ tools: 10, promptTokens: 10, cacheReadTokens: 5, hitRate: 0.5 }])
+  assertEqual(s.byStage[0].stage, 'n/a')
+  assertEqual(s.byStage[0].count, 1)
+})
+
+// ============================================================================
 // 汇总
 // ============================================================================
 const elapsed = Date.now() - startedAt

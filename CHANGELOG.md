@@ -3,6 +3,43 @@
 All notable changes to `dsh-minimal-router`.
 Format: [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/).
 
+## [1.20.0] — 2026-11-08
+
+**探针开始按阶段算账：终于能回答"这个阶段到底省了多少"。**
+
+### Added —— `summarize()` 输出 `byStage`
+
+`cache_probe_report` 的 `summary` 里多了 `byStage` 数组，每个阶段一行：
+
+| 字段 | 含义 |
+|---|---|
+| `stage` | 阶段名（旧记录没有 stage 时是 `n/a`） |
+| `count` | 该阶段出现过的请求数 |
+| `tools` / `toolsChars` | 该阶段**最后一次**的工具表大小 |
+| `promptTokens` / `cacheReadTokens` / `hitRate` | 该阶段的缓存命中（按 token 加权） |
+
+**真机数据（425 条探针记录）**：
+
+```
+auto        288 次 · 274 工具 · 240,981 chars · 命中 98.84%
+n/a         122 次 ·   0 工具 ·       2 chars · 命中 96.67%（接线前的旧记录）
+unity-ui     15 次 · 176 工具 · 124,171 chars · 命中 93.51%
+```
+
+一眼就能看出：切到 `unity-ui` 后工具表小了 **116,810 字符（−48.5%）**。
+
+### Added —— `_tools/claim-next.mjs`（仓库外的工具脚本）
+
+读完整体检数据，直接打印"下一个该认领谁"和可粘贴进 `custom_stages.json` 的 JSON；
+`--write` 可直接写入（先备份）。数据源优先用 task-guard 的 `tool-registry.json`。
+
+### 顺带修的坑
+
+- `task_end` 之后的快照不再保留工具名单 → 认领建议没了数据源。现在 task-guard 在 `task_start`（**含 dryRun**）时写一份持久的 `tool-registry.json`（239 个工具），任务结束也不删。
+- 认领脚本之前只从"调用过的工具"推标签，导致"每个标签都被用过"的假结论；现在改用全量清单算 `used/total`。
+
+**全量 385 项通过**（382 → 385，新增 3 条 byStage 测试）。
+
 ## [1.19.9] — 2026-11-07
 
 **把运行时可观测性补齐。8 项改进，全部来自 2,809 条活动日志 + 21 个历史会话的实测。**

@@ -1,4 +1,4 @@
-# 极简路由（dsh-minimal-router）· v1.19.6 · 小白版说明
+# 极简路由（dsh-minimal-router）· v1.19.7 · 小白版说明
 
 [![Tests](https://github.com/qwq1223211/dsh-minimal-router/actions/workflows/test.yml/badge.svg)](https://github.com/qwq1223211/dsh-minimal-router/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)

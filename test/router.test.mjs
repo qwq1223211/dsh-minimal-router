@@ -1413,13 +1413,23 @@ await test('迟滞集成：显式"切到 X 阶段"一句话就切', async () => 
 })
 
 // ============================================================================
-// 10.8 成本闸门（P1+P2）：按最坏情况估"几轮能回本"
+// 10.8 成本闸门（P1+P2）：几轮能回本
 // ============================================================================
-await test('成本：估算公式正确（成本按最坏情况 = 整段上下文）', () => {
+await test('成本：估算公式正确（成本按"收窄后"的上下文算）', () => {
+  // 【v1.19.7 修正】重建时发的是收窄后的工具表，所以成本要先减掉每轮省下的部分。
   const e = estimateSwitchEconomy({ contextTokens: 100000, deniedBytes: 100000 })
-  assertEqual(e.costTokens, 100000, '最坏情况：整段上下文全价')
   assertEqual(e.savePerTurnTokens, 30000, '100,000 字节 × 0.3')
-  assertEqual(e.paybackTurns, 3.33)
+  assertEqual(e.costTokens, 70000, '100,000 − 30,000（收窄后的上下文）')
+  assertEqual(e.paybackTurns, 2.33)
+})
+
+await test('成本：真机校准 —— 97,189 上下文 / 116,810 字节 → 回本 1.77 轮', () => {
+  // 2026-11-07 实测：新会话切 unity-ui，工具声明 237,350 → 120,540 字节（−116,810），
+  // 每轮省 35,043 tok；实际重建 60,045 tok，旧公式预估 97,189（高估 38%）。
+  const e = estimateSwitchEconomy({ contextTokens: 97189, deniedBytes: 116810 })
+  assertEqual(e.savePerTurnTokens, 35043)
+  assertEqual(e.costTokens, 62146, '97,189 − 35,043；与实测 60,045 相差约 2,100')
+  assertEqual(e.paybackTurns, 1.77, '实测约 1.7 轮')
 })
 
 await test('成本：省不下东西时 payback 是 null（不是 Infinity/NaN）', () => {
@@ -1438,12 +1448,22 @@ await test('成本：回本太快不值得的切换会被拦', () => {
 })
 
 await test('成本：上下文还小的时候放行（回本很快）', () => {
+  // 现实比例：2 万上下文里能摘掉约 3 万字节（≈9,000 tok）
   const v = decideByEconomy({
-    economy: estimateSwitchEconomy({ contextTokens: 20000, deniedBytes: 90000 }),
+    economy: estimateSwitchEconomy({ contextTokens: 20000, deniedBytes: 30000 }),
     maxPaybackTurns: 3,
   })
   assertEqual(v.allow, true)
   assertEqual(v.reason, 'worth-it')
+})
+
+await test('成本：省下的量 ≥ 上下文（退化输入）→ 成本钳到 0，照样放行', () => {
+  // 现实中省不掉比整个 prompt 还多的东西；这是防呆：别算出负成本
+  const e = estimateSwitchEconomy({ contextTokens: 20000, deniedBytes: 90000 })
+  assertEqual(e.costTokens, 0, '不能是负数')
+  assertEqual(e.savePerTurnTokens, 27000)
+  const v = decideByEconomy({ economy: e, maxPaybackTurns: 3 })
+  assertEqual(v.allow, true, '成本为 0 时没有理由拦')
 })
 
 await test('成本：还没有上下文数据时放行（不拿"未知"当"亏本"）', () => {

@@ -619,7 +619,7 @@ async function preExecute(runtime, exec) {
   return next()
 }
 
-await test('集成：一个包装配出 9 个工具 + 尾插 + 全部监听器（三合一后）', () => {
+await test('集成：一个包装配出全部工具（路由 + 熔断 + 探针 + 任务收窄）', () => {
   const rt = makeFakeCtx()
   apply(rt.ctx, {})
   // 路由模块
@@ -633,11 +633,15 @@ await test('集成：一个包装配出 9 个工具 + 尾插 + 全部监听器�
   // 探针模块（同包）
   assert(rt.tools.has('cache_probe_report'), '合并后应该同时注册 cache_probe_report')
   assert(rt.tools.has('cache_probe_clear'))
+  // 任务收窄模块（v2.0.0 从 dsh-task-guard 并入）
+  assert(rt.tools.has('task_start'), '合并后应该同时注册 task_start')
+  assert(rt.tools.has('task_end'))
+  assert(rt.tools.has('task_status'))
   // 尾插只有一条（名字相同会互相 shadow，绝不能重复注入）
   assertEqual(rt.contexts.length, 1, '应该只注册 1 个尾部提示')
   assertEqual(rt.contexts[0].name, 'minimal-router:stage')
-  // pre-execute：router（阶段越界+体检）+ guard（熔断）
-  assertEqual((rt.listeners.get('tools/pre-execute') || []).length, 2)
+  // pre-execute：router（阶段越界+体检）+ guard（熔断）+ task（消费 UI 请求）
+  assertEqual((rt.listeners.get('tools/pre-execute') || []).length, 3)
   // tools/result：guard 记账
   assertEqual((rt.listeners.get('tools/result') || []).length, 1)
   // agent/inbox/claimed：router 关键词切阶段 + guard 新一轮清零
@@ -646,13 +650,14 @@ await test('集成：一个包装配出 9 个工具 + 尾插 + 全部监听器�
   assertEqual((rt.listeners.get('llm/stream') || []).length, 2)
 })
 
-await test('集成：关掉 guard / probe 后只剩路由（高级用户可以裁剪）', () => {
+await test('集成：关掉 guard / probe 后只剩路由 + 任务收窄（高级用户可以裁剪）', () => {
   const rt = makeFakeCtx()
   apply(rt.ctx, { guardEnabled: false, probeEnabled: false })
   assert(rt.tools.has('route_stage'))
+  assert(rt.tools.has('task_start'), '任务收窄是独立模块，不该被 guard/probe 开关影响')
   assertEqual(rt.tools.has('guard_status'), false, 'guard 应该被裁掉')
   assertEqual(rt.tools.has('cache_probe_report'), false, 'probe 应该被裁掉')
-  assertEqual((rt.listeners.get('tools/pre-execute') || []).length, 1)
+  assertEqual((rt.listeners.get('tools/pre-execute') || []).length, 2)
   assertEqual((rt.listeners.get('agent/inbox/claimed') || []).length, 1)
   assertEqual((rt.listeners.get('llm/stream') || []).length, 1)
 })

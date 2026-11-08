@@ -3,6 +3,50 @@
 All notable changes to `dsh-minimal-router`.
 Format: [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/).
 
+## [2.0.0] — 2026-11-08
+
+**把 `dsh-task-guard` 并进来：一个包，四块能力（路由 + 熔断 + 探针 + 任务收窄）。**
+
+### 为什么合
+
+两者 `inject` 相同（`tools`）、钩子相同（`tools/pre-execute`）、工具名不冲突
+（`route_*` vs `task_*`）、状态目录本来就在一起（`~/.dsh/task-guard/`）。
+分开只是历史原因，合并后用户少装一个包、少一次重载。
+
+### 合并了什么
+
+| 原先 | 现在 |
+|---|---|
+| `dsh-task-guard` 单独一个包 | `lib/task.js`（828 行） |
+| `task_start` / `task_end` / `task_status` | **工具名不变**，老用法照旧 |
+| `lib/cost-gate.js` / `lib/scope-preview.js` | 原样搬进本包 `lib/` |
+| 状态目录 `~/.dsh/task-guard/` | **不变**（徽章 `dsh-task-guard-badge` 读的就是它） |
+| 自己的 `tools/pre-execute` 钩子 | 与路由器的钩子并存（同一时刻 3 个监听器） |
+
+### 两处必须说的实现细节
+
+1. **`applyTask(ctx, config)` 收的是原始 config**，不是 `normalizeConfig()` 的产物 ——
+   因为任务模块有自己的 `lockTtlHours` / `hintEnabled` 键，走过白名单会被丢掉。
+2. **`task_*` 进了 `ALWAYS_ALLOW`**。否则收窄到不含 `task` 组时，连 `task_end` 都被摘掉，
+   用户会被锁死在收窄状态里（和 `route_activity` 那次是同一类自噬 bug）。
+
+### 不合并的部分
+
+**徽章 `dsh-task-guard-badge` 保持独立**：它 `inject: ['webServer']` 且带前端 bundle，
+和拦截逻辑是两种生命周期。合进来会让"没有 webServer 的环境"连路由都加载不了。
+
+### Tests
+
+task-guard 的 27 条单测原样搬进 `test/task.test.mjs`，加上路由器原有 399 条。
+两个集成测试的断言随之更新（工具数与 `pre-execute` 监听器数）。
+
+**全量 426 项通过。**
+
+### 迁移
+
+- 老用户：`dsh plugin --profile desktop remove dsh-task-guard` 即可，工具名和状态文件都不变
+- npm：`dsh-task-guard` 会被标记 deprecated，指向本包
+
 ## [1.21.4] — 2026-11-08
 
 **修一个自噬 bug：路由器会把自己的诊断工具摘掉。**

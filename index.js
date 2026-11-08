@@ -54,6 +54,8 @@ import { resolveCapability, formatDegradeWarning } from './lib/model-guard.js'
 // 它们各自是独立的 apply 函数，工具名互不冲突（guard_* / cache_probe_* / route_*）
 import { applyGuard } from './lib/guard.js'
 import { applyProbe } from './lib/probe.js'
+// 【v2.0.0】任务级收窄（原 dsh-task-guard 插件）并入本包，见 lib/task.js 顶部说明
+import { applyTask } from './lib/task.js'
 import {
   DEFAULT_CORE_TOOLS,
   loadCustomStagesSync,
@@ -280,8 +282,7 @@ function keyOf(execOrAgent) {
 
 /** 配置规范化：脏数据一律回退默认，绝不让插件加载失败。 */
 export function normalizeConfig(raw = {}) {
-  const src = raw && typeof raw === 'object' ? raw : {}
-  const mode = src.lintMode
+  const src = raw && typeof raw === 'object' ? raw : {}; const mode = src.lintMode
   const configStages = src.stages && typeof src.stages === 'object' && !Array.isArray(src.stages) ? src.stages : null
   const stages = configStages && Object.keys(configStages).length > 0 ? configStages : DEFAULT_STAGES
   const customStagesFile =
@@ -415,6 +416,8 @@ export function apply(ctx, config = {}) {
   const cfg = normalizeConfig(config)
   // @experimental 并集开关：必须在任何 detectStage / 打分器被调用之前设置
   setUnionEnabled(cfg.unionEnabled)
+  // 任务级收窄模块：传**原始** config，因为它有自己的 lockTtlHours / hintEnabled 键
+  applyTask(ctx, config)
 
   // ------------------------------------------------------------------
   // 阶段表三层合并：内置 → custom_stages.json → cordis.patch.yml 里的 stages
@@ -906,8 +909,7 @@ const degradeSeen = new Set()
   function registerAgentHint(agent) {
     try {
       if (!agent || typeof agent.id !== 'string' || registeredAgents.has(agent.id)) return
-      const agentCtx = agent.ctx
-      const systemPrompt = agentCtx && agentCtx.systemPrompt
+      const agentCtx = agent.ctx; const systemPrompt = agentCtx && agentCtx.systemPrompt
       if (!systemPrompt || typeof systemPrompt.context !== 'function') return
       systemPrompt.context({
         name: 'minimal-router:stage',

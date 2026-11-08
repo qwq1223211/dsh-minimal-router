@@ -1,6 +1,6 @@
 {
   "name": "dsh-minimal-router",
-  "version": "1.21.4",
+  "version": "2.0.0",
   "type": "module",
   "main": "./index.js",
   "description": "Everything-in-one DSH toolkit: stage-based tool routing (auto-classify, tail hint, physical trimming), consecutive-error circuit breaker, and a cache probe that measures the real bill. One install, one reload, one config.",
@@ -51,7 +51,9 @@
     "tools",
     "context-cache",
     "router",
-    "token-saver"
+    "token-saver",
+    "task-scope",
+    "task-guard"
   ],
   "author": "qwq1223211 (https://github.com/qwq1223211)"
 }

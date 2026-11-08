@@ -1136,7 +1136,10 @@ const degradeSeen = new Set()
           hintEffective: guard.safe && hintAvailable && hintRuntime && !hintOffSessions.has(key),
           hintAvailable,
           hintEnabled: hintRuntime && !hintOffSessions.has(key),
-          restrictEffective: cfg.enforceByRestrict && guard.safe,
+          // 【v1.21.3】原来这里是 cfg.enforceByRestrict && guard.safe —— 那是"按配置推断"，
+    // 配置开着就报 true，哪怕 restrict() 当天抛错没生效。现在改成看**真实句柄**：
+    // restrictions 里存着 restrict() 返回的 dispose，有它才算真的摘掉了。
+    restrictEffective: Boolean((restrictions.get(key) || {}).dispose),
           // 当前用的裁剪模式：deny（摘不要的）还是 allow（只留要的）
           restrictMode: cfg.restrictMode === 'allow' ? 'allow' : 'deny',
           restrictedFor: (restrictions.get(key) || {}).stage || '',

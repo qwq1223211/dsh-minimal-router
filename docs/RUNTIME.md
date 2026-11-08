@@ -217,16 +217,40 @@ task-guard 在**下一次 tools/pre-execute** 里消费
 
 ---
 
-## 8. 三个口径别混用
+## 8. 四个口径别混用（含「意图值 vs 实测值」）
 
 | 数字 | 来源 | 含义 |
 |---|---|---|
 | `registeredToolCount` / `toolCount` | 路由器注册表 | 它看得见的工具（如 239） |
 | `estimatedAdvertised` | `注册数 − deny 数` | **估算**（如 141） |
+| `restrictedToolCount` / `deny` | 收窄时算出的 deny 列表长度 | **意图值**：打算摘掉多少个 |
 | 探针的 `tools` | 真正发给 API | **权威**（如 270 → 172） |
 
 三者差的是 **base / 作用域注册工具**（`route_*` / `guard_*` / `cache_probe_*` / `read` / `write` …），
 它们不受收窄影响，路由器也数不进自己的 catalog。**做前后对比只用探针的数字。**
+
+### 意图值为什么可能和真实差数对不上
+
+`denyCount` 是**收窄那一刻**按当时注册表算出来的计划值；而探针的 `tools` 是**实际那一刻**发给 API 的数量。
+两者在两种情况下会漂移：
+
+1. **基线变了**：收窄之后又装/重载了插件，真实工具数涨了，但 `denyCount` 还是老的
+   （实测：`unity-ui` 上报 deny=98，而探针 285→176 是少了 109）
+2. **部分工具不在 catalog 里**：base/作用域工具从来不会被 deny，却计入真实总数
+
+所以「上报摘掉 98」和「实测少了 109」**不是 bug，是口径不同**。要看真实效果，读 `cache_probe_report`。
+
+### `restrictEffective` 的语义（v1.21.3 修正）
+
+以前它是 `enforceByRestrict && guard.safe`——**按配置推断**，配置开着就报 true，哪怕当天
+`restrict()` 抛错没生效。现在改成**看真实句柄**：
+
+```
+restrictEffective = Boolean(restrictions.get(key).dispose)
+```
+
+只有真的拿到了 `restrict()` 返回的 dispose（能撤销 = 确实摘掉了），才报 true。
+
 
 ---
 

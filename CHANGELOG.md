@@ -3,6 +3,47 @@
 All notable changes to `dsh-minimal-router`.
 Format: [Keep a Changelog](https://keepachangelog.com/), versioning: [SemVer](https://semver.org/).
 
+## [1.21.4] — 2026-11-08
+
+**修一个自噬 bug：路由器会把自己的诊断工具摘掉。**
+
+### 现象
+
+按功能清单逐项实测时发现：调用 `route_activity` 报 **unknown tool**。
+
+### 根因
+
+`ALWAYS_ALLOW`（永远保留名单）里有 `route_stage / route_status / route_reset / route_init /
+route_use / route_hint / cache_probe_report / cache_probe_clear / guard_status / guard_reset`，
+**唯独漏了 `route_activity`**。
+
+于是 `route_use({groups:[...]})` 收窄时，它被算进 deny 列表一起摘掉了——用户想查
+"为什么拦我 / 刚才切过什么阶段"，入口就没了。这是个自己吃掉自己的 bug。
+
+### 修复
+
+```diff
+  'guard_reset', // guard 的复位（逃生门）
++ 'route_activity', // 查事件台账（诊断入口，不能被收窄隐藏）
+```
+
+### 同时验证过的其它能力（本轮逐项实测）
+
+| 能力 | 结果 |
+|---|---|
+| 自动模式 manual ⇄ auto | ✅ 双向切换，系统提示文本跟着变（152 / 183 字） |
+| `route_use` 按轮数收窄 | ✅ deny 153；探针 `byPrefix` 实测 253 工具/223,710 字符 → 100 工具/87,412 字符 |
+| `task_start` 任务级收窄 | ✅ dryRun 预览：保留 37 / 摘掉 181，零成本 |
+| `cache_probe_report.byStage` | ✅ auto 40 次 / art 11 次，各自命中率分开算 |
+| `route_status({compact:true})` | ✅ 只回 4 个字段 |
+| 切换记关键词与阶段 | ✅ 台账事件含 `from/to/by/kw/s` |
+| `route_init` 四套预设 | ✅ python-data / web-dev / writing / qq-chat 文件都在；sample 写入 11,106 字节 |
+
+**已知小瑕疵（未修）**：`route_init` 的 `unclaimed` 里 `used` 全是 `null`、`bytes` 全是 0
+（verdict 显示 `no-data`），说明它没读到 `tool-usage.json` 的调用画像。不影响主流程。
+
+**全量 399 项通过。**
+
 ## [1.21.3] — 2026-11-08
 
 **`restrictEffective` 不再"按配置推断"，改为看真实句柄。**
